@@ -1,0 +1,6 @@
+{
+  "name": "Apex Velocity",
+  "description": "Realistic physics racing game featuring career progression, dynamic weather & track conditions, time trial with ghost car replay, customizable vehicle performance upgrades, and intelligent AI opponents.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
