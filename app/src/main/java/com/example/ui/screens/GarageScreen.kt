@@ -61,6 +61,7 @@ import com.example.data.PlayerProfile
 import com.example.model.TireCompound
 import com.example.model.Vehicle
 import com.example.model.VehicleUpgrades
+import com.example.ui.components.DailyChallengesCard
 import com.example.ui.theme.ApexCyan
 import com.example.ui.theme.ApexGold
 import com.example.ui.theme.ApexGreen
@@ -80,7 +81,9 @@ fun GarageScreen(
     onPurchaseVehicle: (String) -> Unit,
     onUpgradeVehicle: (String, String) -> Unit,
     onEquipTireCompound: (String, TireCompound) -> Unit,
-    onUpdateCustomization: (String, String, String?) -> Unit
+    onUpdateCustomization: (String, String, String?) -> Unit,
+    onClaimChallenge: (String) -> Unit = {},
+    onClaimAllBonus: () -> Unit = {}
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val currentVehicle = profile.vehicles.find { it.id == profile.selectedVehicleId } ?: profile.vehicles.first()
@@ -214,6 +217,16 @@ fun GarageScreen(
                     )
                 }
             }
+        }
+
+        // Daily Objectives Card
+        item {
+            DailyChallengesCard(
+                challenges = profile.dailyChallenges,
+                allBonusClaimed = profile.allChallengesBonusClaimed,
+                onClaimChallenge = onClaimChallenge,
+                onClaimAllBonus = onClaimAllBonus
+            )
         }
 
         // Section Tabs: Performance Upgrades vs Customization Paint

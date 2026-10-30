@@ -7,7 +7,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.example.ui.AppScreen
 import com.example.ui.MainViewModel
 import com.example.ui.dialogs.PauseMenuDialog
 import com.example.ui.dialogs.RaceSummaryDialog
@@ -27,12 +31,17 @@ fun RaceScreen(
     val weatherState by viewModel.weatherState.collectAsState()
     val isPaused by viewModel.isPaused.collectAsState()
     val raceResults by viewModel.raceResults.collectAsState()
+    val telemetryHistory by viewModel.telemetryHistory.collectAsState()
+
+    var showTelemetryScreen by remember { mutableStateOf(false) }
 
     val currentVehicle = viewModel.getCurrentVehicle()
     val currentPosition = viewModel.calculatePlayerPosition()
 
     BackHandler {
-        if (!isPaused && raceResults == null) {
+        if (showTelemetryScreen) {
+            showTelemetryScreen = false
+        } else if (!isPaused && raceResults == null) {
             viewModel.pauseRace()
         } else {
             viewModel.stopRace()
@@ -78,7 +87,7 @@ fun RaceScreen(
         )
 
         // 3. Pause & Pit Stop Dialog
-        if (isPaused && raceResults == null) {
+        if (isPaused && raceResults == null && !showTelemetryScreen) {
             PauseMenuDialog(
                 currentCompound = currentVehicle.upgrades.tireCompound,
                 trackWetness = weatherState.trackWetness,
@@ -88,6 +97,7 @@ fun RaceScreen(
                 onPitStopTireSwap = { viewModel.pitStopTireSwap(it) },
                 onToggleAudio = { viewModel.toggleAudio() },
                 onToggleControls = { viewModel.toggleControlScheme() },
+                onOpenTelemetry = { showTelemetryScreen = true },
                 onRestart = { viewModel.restartRace() },
                 onExit = {
                     viewModel.stopRace()
@@ -96,15 +106,30 @@ fun RaceScreen(
             )
         }
 
-        // 4. Race Results Summary Dialog
+        // 4. Live Telemetry & Performance Screen Overlay
+        if (showTelemetryScreen) {
+            TelemetryScreen(
+                vehicle = currentVehicle,
+                telemetryHistory = telemetryHistory,
+                onBack = { showTelemetryScreen = false }
+            )
+        }
+
+        // 5. Race Results Summary Dialog
         if (raceResults != null) {
+            val summary = raceResults!!
             RaceSummaryDialog(
-                results = raceResults!!,
+                results = summary,
                 onContinue = {
                     viewModel.stopRace()
                     onBackToMenu()
                 },
-                onRetry = { viewModel.restartRace() }
+                onRetry = { viewModel.restartRace() },
+                onViewLeaderboard = {
+                    viewModel.stopRace()
+                    viewModel.selectLeaderboardTrack(summary.trackId)
+                    viewModel.navigateTo(AppScreen.LEADERBOARD)
+                }
             )
         }
     }

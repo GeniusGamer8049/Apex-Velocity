@@ -16,15 +16,25 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 
+import com.example.model.ChallengeType
+import com.example.model.DailyChallenge
+import com.example.model.DailyChallengeGenerator
+
 data class PlayerProfile(
     val credits: Int = 2500,
     val reputation: Int = 0,
     val selectedVehicleId: String = "apex_gt86",
     val vehicles: List<Vehicle> = VehicleRegistry.createDefaultVehicles(),
     val bestLapTimes: Map<String, Long> = emptyMap(), // trackId -> timeMs
+    val bestLapVehicles: Map<String, String> = emptyMap(), // trackId -> vehicleName
     val completedEventIds: Set<String> = emptySet(),
     val isAudioMuted: Boolean = false,
-    val controlScheme: ControlScheme = ControlScheme.BUTTONS
+    val controlScheme: ControlScheme = ControlScheme.BUTTONS,
+    val dailyChallenges: List<DailyChallenge> = emptyList(),
+    val lastChallengeDateKey: String = "",
+    val allChallengesBonusClaimed: Boolean = false,
+    val driverName: String = "Apex Pilot",
+    val driverCountry: String = "US"
 )
 
 enum class ControlScheme(val displayName: String) {
@@ -79,8 +89,39 @@ class RacingRepository(private val context: Context) {
             } catch (ignored: Exception) {}
         }
 
+        // Load best lap vehicles
+        val bestVehiclesJson = prefs.getString("best_lap_vehicles_json", null)
+        val bestVehicles = mutableMapOf<String, String>()
+        if (bestVehiclesJson != null) {
+            try {
+                val json = JSONObject(bestVehiclesJson)
+                val keys = json.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    bestVehicles[k] = json.getString(k)
+                }
+            } catch (ignored: Exception) {}
+        }
+
+        // Driver Profile
+        val driverName = prefs.getString("driver_name", "Apex Pilot") ?: "Apex Pilot"
+        val driverCountry = prefs.getString("driver_country", "US") ?: "US"
+
         // Completed events
         val completedSet = prefs.getStringSet("completed_events", emptySet()) ?: emptySet()
+
+        // Daily Challenges
+        val todayKey = DailyChallengeGenerator.getTodayKey()
+        val savedDateKey = prefs.getString("challenge_date_key", "") ?: ""
+        val challengesJson = prefs.getString("challenges_json", null)
+        val allBonusClaimed = if (savedDateKey == todayKey) prefs.getBoolean("all_challenges_bonus_claimed", false) else false
+
+        val challenges = if (savedDateKey == todayKey && challengesJson != null) {
+            val defaults = DailyChallengeGenerator.generateForDate(todayKey)
+            parseChallengesJson(challengesJson, defaults)
+        } else {
+            DailyChallengeGenerator.generateForDate(todayKey)
+        }
 
         return PlayerProfile(
             credits = credits,
@@ -88,9 +129,15 @@ class RacingRepository(private val context: Context) {
             selectedVehicleId = selectedCar,
             vehicles = vehicles,
             bestLapTimes = bestTimes,
+            bestLapVehicles = bestVehicles,
             completedEventIds = completedSet,
             isAudioMuted = isMuted,
-            controlScheme = controlScheme
+            controlScheme = controlScheme,
+            dailyChallenges = challenges,
+            lastChallengeDateKey = todayKey,
+            allChallengesBonusClaimed = allBonusClaimed,
+            driverName = driverName,
+            driverCountry = driverCountry
         )
     }
 
@@ -108,9 +155,74 @@ class RacingRepository(private val context: Context) {
             profile.bestLapTimes.forEach { (k, v) -> bestTimesObj.put(k, v) }
             putString("best_laps_json", bestTimesObj.toString())
 
+            val bestVehiclesObj = JSONObject()
+            profile.bestLapVehicles.forEach { (k, v) -> bestVehiclesObj.put(k, v) }
+            putString("best_lap_vehicles_json", bestVehiclesObj.toString())
+
+            putString("driver_name", profile.driverName)
+            putString("driver_country", profile.driverCountry)
+
             putStringSet("completed_events", profile.completedEventIds)
+
+            putString("challenge_date_key", profile.lastChallengeDateKey)
+            putString("challenges_json", serializeChallengesJson(profile.dailyChallenges))
+            putBoolean("all_challenges_bonus_claimed", profile.allChallengesBonusClaimed)
             apply()
         }
+    }
+
+    fun updateChallengeProgress(type: ChallengeType, addValue: Int = 0, absoluteValue: Int = 0) {
+        val curr = _profile.value
+        var changed = false
+        val updated = curr.dailyChallenges.map { ch ->
+            if (ch.type == type && !ch.isClaimed) {
+                val newVal = if (absoluteValue > 0) {
+                    maxOf(ch.currentValue, absoluteValue)
+                } else {
+                    ch.currentValue + addValue
+                }
+                if (newVal != ch.currentValue) {
+                    changed = true
+                    ch.copy(currentValue = newVal.coerceAtMost(ch.targetValue))
+                } else ch
+            } else ch
+        }
+        if (changed) {
+            saveProfile(curr.copy(dailyChallenges = updated))
+        }
+    }
+
+    fun claimChallengeReward(challengeId: String): Boolean {
+        val curr = _profile.value
+        val challenge = curr.dailyChallenges.find { it.id == challengeId } ?: return false
+        if (!challenge.isCompleted || challenge.isClaimed) return false
+
+        val updated = curr.dailyChallenges.map {
+            if (it.id == challengeId) it.copy(isClaimed = true) else it
+        }
+        saveProfile(
+            curr.copy(
+                credits = curr.credits + challenge.rewardCredits,
+                reputation = curr.reputation + challenge.rewardRep,
+                dailyChallenges = updated
+            )
+        )
+        return true
+    }
+
+    fun claimAllDailyBonus(): Boolean {
+        val curr = _profile.value
+        if (curr.allChallengesBonusClaimed) return false
+        if (!curr.dailyChallenges.all { it.isCompleted }) return false
+
+        saveProfile(
+            curr.copy(
+                credits = curr.credits + 10000,
+                reputation = curr.reputation + 300,
+                allChallengesBonusClaimed = true
+            )
+        )
+        return true
     }
 
     fun addRewards(earnedCredits: Int, earnedRep: Int) {
@@ -220,17 +332,44 @@ class RacingRepository(private val context: Context) {
         )
     }
 
-    fun recordBestLap(trackId: String, lapTimeMs: Long, ghostLap: GhostLap?) {
+    fun recordBestLap(trackId: String, lapTimeMs: Long, ghostLap: GhostLap?, vehicleName: String = "Apex GT-86 Coupe") {
         val curr = _profile.value
         val currentBest = curr.bestLapTimes[trackId] ?: Long.MAX_VALUE
         if (lapTimeMs < currentBest) {
             val updatedTimes = curr.bestLapTimes.toMutableMap().apply { put(trackId, lapTimeMs) }
-            saveProfile(curr.copy(bestLapTimes = updatedTimes))
+            val updatedVehicles = curr.bestLapVehicles.toMutableMap().apply { put(trackId, vehicleName) }
+            saveProfile(curr.copy(bestLapTimes = updatedTimes, bestLapVehicles = updatedVehicles))
             if (ghostLap != null) {
                 ghostLapsCache[trackId] = ghostLap
                 saveGhostLap(trackId, ghostLap)
             }
         }
+    }
+
+    fun updateDriverProfile(driverName: String, countryCode: String) {
+        val curr = _profile.value
+        saveProfile(
+            curr.copy(
+                driverName = driverName.trim().ifEmpty { "Apex Pilot" },
+                driverCountry = countryCode.trim().uppercase().ifEmpty { "US" }
+            )
+        )
+    }
+
+    fun getLeaderboard(trackId: String): List<com.example.model.LeaderboardEntry> {
+        val curr = _profile.value
+        val pb = curr.bestLapTimes[trackId]
+        val vehicleName = curr.bestLapVehicles[trackId]
+            ?: (curr.vehicles.find { it.id == curr.selectedVehicleId }?.name ?: "Apex GT-86 Coupe")
+        val vehicleCategory = curr.vehicles.find { it.name == vehicleName }?.category ?: "Sport Compact"
+        return com.example.model.GlobalLeaderboardRegistry.buildTrackLeaderboard(
+            trackId = trackId,
+            playerPbMs = pb,
+            playerName = curr.driverName,
+            playerCountry = curr.driverCountry,
+            playerVehicleName = vehicleName,
+            playerVehicleCategory = vehicleCategory
+        )
     }
 
     fun getGhostLap(trackId: String): GhostLap? {
@@ -360,6 +499,37 @@ class RacingRepository(private val context: Context) {
                 } else {
                     def
                 }
+            }
+        } catch (e: Exception) {
+            defaults
+        }
+    }
+
+    private fun serializeChallengesJson(challenges: List<DailyChallenge>): String {
+        val arr = JSONArray()
+        for (c in challenges) {
+            val obj = JSONObject()
+            obj.put("id", c.id)
+            obj.put("val", c.currentValue)
+            obj.put("claimed", c.isClaimed)
+            arr.put(obj)
+        }
+        return arr.toString()
+    }
+
+    private fun parseChallengesJson(jsonStr: String, defaults: List<DailyChallenge>): List<DailyChallenge> {
+        return try {
+            val arr = JSONArray(jsonStr)
+            val map = mutableMapOf<String, Pair<Int, Boolean>>()
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                map[o.getString("id")] = Pair(o.getInt("val"), o.getBoolean("claimed"))
+            }
+            defaults.map { def ->
+                val p = map[def.id]
+                if (p != null) {
+                    def.copy(currentValue = p.first, isClaimed = p.second)
+                } else def
             }
         } catch (e: Exception) {
             defaults

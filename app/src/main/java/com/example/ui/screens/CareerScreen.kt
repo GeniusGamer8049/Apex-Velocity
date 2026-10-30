@@ -59,6 +59,7 @@ import com.example.model.CareerRaceEvent
 import com.example.model.CareerRegistry
 import com.example.model.CareerTier
 import com.example.model.TrackRegistry
+import com.example.ui.components.DailyChallengesCard
 import com.example.ui.theme.ApexCyan
 import com.example.ui.theme.ApexGold
 import com.example.ui.theme.ApexGreen
@@ -74,7 +75,9 @@ import com.example.ui.theme.TextWhite
 @Composable
 fun CareerScreen(
     profile: PlayerProfile,
-    onStartCareerRace: (CareerRaceEvent) -> Unit
+    onStartCareerRace: (CareerRaceEvent) -> Unit,
+    onClaimChallenge: (String) -> Unit,
+    onClaimAllBonus: () -> Unit
 ) {
     val tiers = remember { CareerRegistry.createDefaultTiers() }
     var selectedTierIndex by remember { mutableIntStateOf(0) }
@@ -178,6 +181,16 @@ fun CareerScreen(
                     )
                 }
             }
+        }
+
+        // 24H Daily Objectives Card
+        item {
+            DailyChallengesCard(
+                challenges = profile.dailyChallenges,
+                allBonusClaimed = profile.allChallengesBonusClaimed,
+                onClaimChallenge = onClaimChallenge,
+                onClaimAllBonus = onClaimAllBonus
+            )
         }
 
         // Tier Tabs (Tier 1..4)

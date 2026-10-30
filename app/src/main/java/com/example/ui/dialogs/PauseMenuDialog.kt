@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.PlayArrow
@@ -59,6 +60,7 @@ fun PauseMenuDialog(
     onPitStopTireSwap: (TireCompound) -> Unit,
     onToggleAudio: () -> Unit,
     onToggleControls: () -> Unit,
+    onOpenTelemetry: () -> Unit,
     onRestart: () -> Unit,
     onExit: () -> Unit
 ) {
@@ -190,6 +192,17 @@ fun PauseMenuDialog(
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                         Text("RESUME RACE", fontWeight = FontWeight.Black)
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = onOpenTelemetry,
+                    modifier = Modifier.fillMaxWidth().height(44.dp).testTag("pause_open_telemetry_button"),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.BarChart, contentDescription = null, modifier = Modifier.size(18.dp), tint = ApexCyan)
+                        Text("VEHICLE TELEMETRY & METRICS", color = ApexCyan, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
 

@@ -55,14 +55,17 @@ data class RaceResults(
     val cleanBonus: Int,
     val driftBonus: Int,
     val repEarned: Int,
-    val isTimeTrial: Boolean
+    val isTimeTrial: Boolean,
+    val globalRank: Int? = null,
+    val trackId: String = "monaco_riviera"
 )
 
 @Composable
 fun RaceSummaryDialog(
     results: RaceResults,
     onContinue: () -> Unit,
-    onRetry: () -> Unit
+    onRetry: () -> Unit,
+    onViewLeaderboard: (() -> Unit)? = null
 ) {
     Dialog(onDismissRequest = {}) {
         Card(
@@ -120,19 +123,43 @@ fun RaceSummaryDialog(
                         .background(DarkSurfaceElevated)
                         .padding(12.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("BEST LAP TIME", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            text = formatLapTime(results.bestLapTimeMs),
-                            color = ApexCyan,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("BEST LAP TIME", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                text = formatLapTime(results.bestLapTimeMs),
+                                color = ApexCyan,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        if (results.globalRank != null) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("GLOBAL RANK", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = ApexGold, modifier = Modifier.size(14.dp))
+                                    Text(
+                                        text = "#${results.globalRank} WORLDWIDE",
+                                        color = ApexGold,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -187,28 +214,51 @@ fun RaceSummaryDialog(
                 }
 
                 // Action Buttons
-                Row(
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedButton(
-                        onClick = onRetry,
-                        modifier = Modifier.weight(1f).height(48.dp),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Text("RETRY", fontWeight = FontWeight.Bold)
+                    if (onViewLeaderboard != null) {
+                        Button(
+                            onClick = onViewLeaderboard,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp)
+                                .testTag("view_leaderboard_summary_button"),
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated, contentColor = ApexCyan),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, ApexCyan),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = ApexGold, modifier = Modifier.size(16.dp))
+                                Text("VIEW GLOBAL LEADERBOARD", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                            }
                         }
                     }
 
-                    Button(
-                        onClick = onContinue,
-                        modifier = Modifier.weight(1f).height(48.dp).testTag("continue_race_summary_button"),
-                        colors = ButtonDefaults.buttonColors(containerColor = ApexCyan, contentColor = CarbonBlack),
-                        shape = RoundedCornerShape(10.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text("CONTINUE", fontWeight = FontWeight.Black)
+                        OutlinedButton(
+                            onClick = onRetry,
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Text("RETRY", fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Button(
+                            onClick = onContinue,
+                            modifier = Modifier.weight(1f).height(48.dp).testTag("continue_race_summary_button"),
+                            colors = ButtonDefaults.buttonColors(containerColor = ApexCyan, contentColor = CarbonBlack),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("CONTINUE", fontWeight = FontWeight.Black)
+                        }
                     }
                 }
             }

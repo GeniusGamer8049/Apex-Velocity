@@ -26,6 +26,12 @@ data class CarPhysicsState(
     var currentGear: Int = 1,
     var slipAngleDeg: Float = 0f,
     var lateralG: Float = 0f,
+    var longitudinalG: Float = 0f,
+    var downforceN: Float = 0f,
+    var tireTempFL: Float = 82f,
+    var tireTempFR: Float = 82f,
+    var tireTempRL: Float = 80f,
+    var tireTempRR: Float = 80f,
     var isDrifting: Boolean = false,
     var isAquaplaning: Boolean = false,
     var isBraking: Boolean = false,
@@ -212,6 +218,8 @@ class PhysicsEngine {
         // Net longitudinal force
         val netLongForce = drivingForce - (brakingForce * (if (vLong > 0) 1f else -1f)) - dragForce - rollingResistance
         val longAcc = netLongForce / vehicle.effectiveWeightKg
+        state.longitudinalG = (longAcc / 9.81f).coerceIn(-2.5f, 2.5f)
+        state.downforceN = downforceN
 
         // 7. Lateral Cornering & Drift Physics (Pacejka Curve)
         val slipAngleRad = if (abs(vLong) > 0.5f) atan2(vLat.toDouble(), abs(vLong).toDouble()).toFloat() else 0f
@@ -240,6 +248,25 @@ class PhysicsEngine {
 
         val latAcc = lateralFrictionForce / vehicle.effectiveWeightKg
         state.lateralG = abs(latAcc) / 9.81f
+
+        // Tire Thermal Dynamics (FL, FR, RL, RR)
+        val ambientTemp = if (trackWetness > 0.5f) 65f else 78f
+        val coolingRate = if (trackWetness > 0.3f) 4.0f else 1.2f
+        val frontBrakeHeating = if (state.isBraking) brakeInput * 24f else 0f
+        val lateralHeatingFL = if (vLat < 0) abs(state.lateralG) * 16f else abs(state.lateralG) * 7f
+        val lateralHeatingFR = if (vLat > 0) abs(state.lateralG) * 16f else abs(state.lateralG) * 7f
+        val rearPowerHeating = if (throttleInput > 0.4f) throttleInput * 14f else 0f
+        val driftHeating = if (state.isDrifting) (abs(state.slipAngleDeg) / 10f) * 25f else 0f
+
+        state.tireTempFL += (frontBrakeHeating + lateralHeatingFL - (state.tireTempFL - ambientTemp) * coolingRate) * dt
+        state.tireTempFR += (frontBrakeHeating + lateralHeatingFR - (state.tireTempFR - ambientTemp) * coolingRate) * dt
+        state.tireTempRL += (rearPowerHeating + driftHeating + (if (vLat < 0) abs(state.lateralG) * 10f else 4f) - (state.tireTempRL - ambientTemp) * coolingRate) * dt
+        state.tireTempRR += (rearPowerHeating + driftHeating + (if (vLat > 0) abs(state.lateralG) * 10f else 4f) - (state.tireTempRR - ambientTemp) * coolingRate) * dt
+
+        state.tireTempFL = state.tireTempFL.coerceIn(45f, 145f)
+        state.tireTempFR = state.tireTempFR.coerceIn(45f, 145f)
+        state.tireTempRL = state.tireTempRL.coerceIn(45f, 145f)
+        state.tireTempRR = state.tireTempRR.coerceIn(45f, 145f)
 
         // Drift state & score
         val isSliding = abs(state.slipAngleDeg) > 12f && speedMs > 8f

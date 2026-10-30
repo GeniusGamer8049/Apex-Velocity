@@ -12,8 +12,10 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -34,7 +36,9 @@ import com.example.ui.AppScreen
 import com.example.ui.MainViewModel
 import com.example.ui.screens.CareerScreen
 import com.example.ui.screens.GarageScreen
+import com.example.ui.screens.LeaderboardScreen
 import com.example.ui.screens.RaceScreen
+import com.example.ui.screens.TelemetryScreen
 import com.example.ui.screens.TimeTrialScreen
 import com.example.ui.theme.ApexCyan
 import com.example.ui.theme.CarbonBlack
@@ -113,7 +117,7 @@ fun RacingApp(viewModel: MainViewModel) {
                         selected = currentScreen == AppScreen.TIME_TRIAL,
                         onClick = { viewModel.navigateTo(AppScreen.TIME_TRIAL) },
                         icon = { Icon(Icons.Default.Timer, contentDescription = "Time Trial") },
-                        label = { Text("Time Trial", fontWeight = FontWeight.Bold, fontSize = 11.sp) },
+                        label = { Text("Time Trial", fontWeight = FontWeight.Bold, fontSize = 10.sp) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = CarbonBlack,
                             selectedTextColor = ApexCyan,
@@ -122,6 +126,36 @@ fun RacingApp(viewModel: MainViewModel) {
                             unselectedTextColor = TextMuted
                         ),
                         modifier = Modifier.testTag("nav_time_trial")
+                    )
+
+                    NavigationBarItem(
+                        selected = currentScreen == AppScreen.LEADERBOARD,
+                        onClick = { viewModel.navigateTo(AppScreen.LEADERBOARD) },
+                        icon = { Icon(Icons.Default.Leaderboard, contentDescription = "Rankings") },
+                        label = { Text("Rankings", fontWeight = FontWeight.Bold, fontSize = 10.sp) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = CarbonBlack,
+                            selectedTextColor = ApexCyan,
+                            indicatorColor = ApexCyan,
+                            unselectedIconColor = TextMuted,
+                            unselectedTextColor = TextMuted
+                        ),
+                        modifier = Modifier.testTag("nav_leaderboard")
+                    )
+
+                    NavigationBarItem(
+                        selected = currentScreen == AppScreen.TELEMETRY,
+                        onClick = { viewModel.navigateTo(AppScreen.TELEMETRY) },
+                        icon = { Icon(Icons.Default.BarChart, contentDescription = "Telemetry") },
+                        label = { Text("Telemetry", fontWeight = FontWeight.Bold, fontSize = 10.sp) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = CarbonBlack,
+                            selectedTextColor = ApexCyan,
+                            indicatorColor = ApexCyan,
+                            unselectedIconColor = TextMuted,
+                            unselectedTextColor = TextMuted
+                        ),
+                        modifier = Modifier.testTag("nav_telemetry")
                     )
                 }
             }
@@ -143,14 +177,18 @@ fun RacingApp(viewModel: MainViewModel) {
                             onEquipTireCompound = { vid, comp -> viewModel.equipTireCompound(vid, comp) },
                             onUpdateCustomization = { vid, color, underglow ->
                                 viewModel.updateVehicleCustomization(vid, color, underglow)
-                            }
+                            },
+                            onClaimChallenge = { viewModel.claimChallenge(it) },
+                            onClaimAllBonus = { viewModel.claimAllDailyBonus() }
                         )
                     }
 
                     AppScreen.CAREER -> {
                         CareerScreen(
                             profile = profile,
-                            onStartCareerRace = { viewModel.startCareerRace(it) }
+                            onStartCareerRace = { viewModel.startCareerRace(it) },
+                            onClaimChallenge = { viewModel.claimChallenge(it) },
+                            onClaimAllBonus = { viewModel.claimAllDailyBonus() }
                         )
                     }
 
@@ -160,7 +198,36 @@ fun RacingApp(viewModel: MainViewModel) {
                             ghostLapProvider = { viewModel.getGhostLap(it) },
                             onStartTimeTrial = { track, weather, ghost ->
                                 viewModel.startTimeTrial(track, weather, ghost)
+                            },
+                            onViewLeaderboard = { trackId ->
+                                viewModel.selectLeaderboardTrack(trackId)
+                                viewModel.navigateTo(AppScreen.LEADERBOARD)
                             }
+                        )
+                    }
+
+                    AppScreen.LEADERBOARD -> {
+                        val selectedTrackId by viewModel.leaderboardSelectedTrackId.collectAsState()
+                        LeaderboardScreen(
+                            profile = profile,
+                            selectedTrackId = selectedTrackId,
+                            onSelectTrack = { viewModel.selectLeaderboardTrack(it) },
+                            getLeaderboard = { viewModel.getLeaderboard(it) },
+                            onStartTimeTrial = { track ->
+                                viewModel.startTimeTrial(track, track.defaultWeather, true)
+                            },
+                            onUpdateDriverProfile = { name, country ->
+                                viewModel.updateDriverProfile(name, country)
+                            }
+                        )
+                    }
+
+                    AppScreen.TELEMETRY -> {
+                        val telemetryHistory by viewModel.telemetryHistory.collectAsState()
+                        TelemetryScreen(
+                            vehicle = viewModel.getCurrentVehicle(),
+                            telemetryHistory = telemetryHistory,
+                            onBack = { viewModel.navigateTo(AppScreen.GARAGE) }
                         )
                     }
 

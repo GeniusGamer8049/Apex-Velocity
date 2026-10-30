@@ -350,6 +350,13 @@ fun RaceHud(
                     Text(String.format("Lateral G: %.2f G", playerState.lateralG), color = if (playerState.lateralG > 1.2f) ApexRed else TextWhite, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
                     Text(String.format("Slip Angle: %.1f°", playerState.slipAngleDeg), color = if (playerState.isDrifting) ApexOrange else TextWhite, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
                     Text(String.format("Tire Grip: %.0f%%", playerState.effectiveTireGrip * 100f), color = if (playerState.effectiveTireGrip < 0.6f) ApexRed else ApexGreen, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                    Text(
+                        text = "Tires: FL:${playerState.tireTempFL.toInt()}° FR:${playerState.tireTempFR.toInt()}° RL:${playerState.tireTempRL.toInt()}° RR:${playerState.tireTempRR.toInt()}°C",
+                        color = if (playerState.tireTempFL > 110f || playerState.tireTempFR > 110f) ApexOrange else ApexGreen,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text("Downforce: ${playerState.downforceN.toInt()} N", color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                     if (playerState.driftScore > 0) {
                         Text("Drift Points: ${playerState.driftScore}", color = ApexGold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }

@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,6 +28,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -64,7 +66,8 @@ import com.example.ui.theme.TextWhite
 fun TimeTrialScreen(
     profile: PlayerProfile,
     ghostLapProvider: (String) -> GhostLap?,
-    onStartTimeTrial: (track: Track, weather: WeatherType, enableGhost: Boolean) -> Unit
+    onStartTimeTrial: (track: Track, weather: WeatherType, enableGhost: Boolean) -> Unit,
+    onViewLeaderboard: ((trackId: String) -> Unit)? = null
 ) {
     var selectedTrackId by remember { mutableStateOf("monaco_riviera") }
     var selectedWeather by remember { mutableStateOf(WeatherType.SUNNY_CLEAR) }
@@ -264,24 +267,46 @@ fun TimeTrialScreen(
             }
         }
 
-        // Launch Time Trial Button
+        // Launch Time Trial & Leaderboard Buttons
         item {
             Spacer(modifier = Modifier.height(8.dp))
-            Button(
-                onClick = { onStartTimeTrial(track, selectedWeather, enableGhost && ghostLap != null) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .testTag("start_time_trial_button"),
-                colors = ButtonDefaults.buttonColors(containerColor = ApexCyan, contentColor = CarbonBlack),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (onViewLeaderboard != null) {
+                    OutlinedButton(
+                        onClick = { onViewLeaderboard(selectedTrackId) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp)
+                            .testTag("time_trial_view_leaderboard_button"),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, ApexCyan),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Timer, contentDescription = null, tint = ApexCyan, modifier = Modifier.size(18.dp))
+                            Text("VIEW GLOBAL LEADERBOARD", color = ApexCyan, fontWeight = FontWeight.Black, fontSize = 13.sp)
+                        }
+                    }
+                }
+
+                Button(
+                    onClick = { onStartTimeTrial(track, selectedWeather, enableGhost && ghostLap != null) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .testTag("start_time_trial_button"),
+                    colors = ButtonDefaults.buttonColors(containerColor = ApexCyan, contentColor = CarbonBlack),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(22.dp))
-                    Text("START TIME TRIAL", fontWeight = FontWeight.Black, fontSize = 15.sp)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(22.dp))
+                        Text("START TIME TRIAL", fontWeight = FontWeight.Black, fontSize = 15.sp)
+                    }
                 }
             }
         }

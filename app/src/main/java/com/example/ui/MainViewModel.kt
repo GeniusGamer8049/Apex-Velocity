@@ -22,7 +22,10 @@ import com.example.physics.AiRacer
 import com.example.physics.CarPhysicsState
 import com.example.physics.ParticleSystem
 import com.example.physics.PhysicsEngine
+import com.example.model.ChallengeType
+import com.example.model.TelemetryPoint
 import com.example.ui.dialogs.RaceResults
+import kotlin.math.abs
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,6 +39,8 @@ enum class AppScreen {
     GARAGE,
     CAREER,
     TIME_TRIAL,
+    LEADERBOARD,
+    TELEMETRY,
     RACING
 }
 
@@ -69,6 +74,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val weatherState = MutableStateFlow(DynamicWeatherState())
     val isPaused = MutableStateFlow(false)
     val raceResults = MutableStateFlow<RaceResults?>(null)
+
+    private val _telemetryHistory = MutableStateFlow<List<TelemetryPoint>>(createInitialTelemetry())
+    val telemetryHistory: StateFlow<List<TelemetryPoint>> = _telemetryHistory.asStateFlow()
+    private var telemetrySampleAccumulator: Float = 0f
+
+    val leaderboardSelectedTrackId = MutableStateFlow(TrackRegistry.allTracks.first().id)
 
     // Player inputs
     var throttleInput: Float = 0f
@@ -255,6 +266,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     // 5. Update Particles
                     particleSystem.update(dt)
 
+                    // 5b. Sample Real-Time Telemetry
+                    telemetrySampleAccumulator += dt
+                    if (telemetrySampleAccumulator >= 0.08f) {
+                        telemetrySampleAccumulator = 0f
+                        val hist = _telemetryHistory.value.toMutableList()
+                        if (hist.size >= 80) hist.removeAt(0)
+                        hist.add(
+                            TelemetryPoint(
+                                timeSec = raceElapsedSec,
+                                speedKmh = pState.speedKmh,
+                                rpm = pState.rpm,
+                                throttle = throttleInput,
+                                brake = brakeInput,
+                                lateralG = pState.lateralG,
+                                longitudinalG = pState.longitudinalG,
+                                tempFL = pState.tireTempFL,
+                                tempFR = pState.tireTempFR,
+                                tempRL = pState.tireTempRL,
+                                tempRR = pState.tireTempRR,
+                                gear = pState.currentGear,
+                                downforceN = pState.downforceN
+                            )
+                        )
+                        _telemetryHistory.value = hist
+                    }
+
+                    // 5c. Track Real-Time Daily Challenges
+                    if (pState.speedKmh > 100f) {
+                        repository.updateChallengeProgress(ChallengeType.TOP_SPEED, absoluteValue = pState.speedKmh.toInt())
+                    }
+                    if (pState.isDrifting) {
+                        repository.updateChallengeProgress(ChallengeType.DRIFT_POINTS, addValue = (abs(pState.slipAngleDeg) * 0.25f).toInt())
+                    }
+
                     // 6. Update Procedural Audio
                     proceduralAudio.targetRpm = pState.rpm
                     proceduralAudio.isDrifting = pState.isDrifting
@@ -275,7 +320,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 lapTimeMs = pState.lastLapTimeMs,
                                 frames = recordedLapFrames.toList()
                             )
-                            repository.recordBestLap(activeTrack.id, pState.lastLapTimeMs, newGhost)
+                            repository.recordBestLap(activeTrack.id, pState.lastLapTimeMs, newGhost, vehicle.name)
                             activeGhostLap.value = newGhost
                         }
                         recordedLapFrames.clear()
@@ -364,8 +409,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repository.completeRaceEvent(event.id, pos, basePrize + cleanBonus + driftBonus, repGain)
         }
 
+        // Daily Challenge Progress on Finish
+        if (cleanLap) {
+            repository.updateChallengeProgress(ChallengeType.CLEAN_RACE, addValue = 1)
+        }
+        if (pos <= 2) {
+            repository.updateChallengeProgress(ChallengeType.PODIUM_FINISH, addValue = 1)
+        }
+        val isWetRace = (weatherState.value.currentWeather == WeatherType.LIGHT_RAIN ||
+                weatherState.value.currentWeather == WeatherType.THUNDERSTORM ||
+                weatherState.value.trackWetness > 0.4f)
+        if (pos == 1 && isWetRace) {
+            repository.updateChallengeProgress(ChallengeType.WET_RACE_WIN, addValue = 1)
+        }
+        repository.updateChallengeProgress(ChallengeType.COMPLETE_LAPS, addValue = activeTotalLaps)
+
+        val vehicle = getCurrentVehicle()
         val currentBest = profile.value.bestLapTimes[activeTrack.id] ?: Long.MAX_VALUE
         val isNewBest = pState.bestLapTimeMs in 1 until currentBest
+        if (isNewBest) {
+            val newGhost = if (recordedLapFrames.isNotEmpty()) {
+                GhostLap(
+                    trackId = activeTrack.id,
+                    carName = vehicle.name,
+                    lapTimeMs = pState.bestLapTimeMs,
+                    frames = recordedLapFrames.toList()
+                )
+            } else null
+            repository.recordBestLap(activeTrack.id, pState.bestLapTimeMs, newGhost, vehicle.name)
+        }
+
+        val trackLeaderboard = repository.getLeaderboard(activeTrack.id)
+        val rankOnBoard = trackLeaderboard.find { it.isPlayer }?.rank
 
         raceResults.value = RaceResults(
             position = pos,
@@ -376,9 +451,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             cleanBonus = cleanBonus,
             driftBonus = driftBonus,
             repEarned = repGain,
-            isTimeTrial = false
+            isTimeTrial = false,
+            globalRank = rankOnBoard,
+            trackId = activeTrack.id
         )
     }
+
+    fun selectLeaderboardTrack(trackId: String) {
+        leaderboardSelectedTrackId.value = trackId
+    }
+
+    fun updateDriverProfile(name: String, country: String) {
+        repository.updateDriverProfile(name, country)
+    }
+
+    fun getLeaderboard(trackId: String) = repository.getLeaderboard(trackId)
+
+    fun claimChallenge(challengeId: String) = repository.claimChallengeReward(challengeId)
+    fun claimAllDailyBonus() = repository.claimAllDailyBonus()
 
     fun pauseRace() {
         isPaused.value = true
@@ -429,5 +519,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         return pos
+    }
+
+    private fun createInitialTelemetry(): List<TelemetryPoint> {
+        val list = mutableListOf<TelemetryPoint>()
+        for (i in 0 until 40) {
+            val t = i * 0.1f
+            val spd = 120f + kotlin.math.sin(t * 1.5).toFloat() * 60f
+            val rpm = 4500f + kotlin.math.sin(t * 1.5).toFloat() * 2200f
+            val lat = kotlin.math.abs(kotlin.math.sin(t * 1.2)).toFloat() * 1.25f
+            list.add(
+                TelemetryPoint(
+                    timeSec = t,
+                    speedKmh = spd,
+                    rpm = rpm,
+                    throttle = (0.5f + kotlin.math.sin(t).toFloat() * 0.5f).coerceIn(0f, 1f),
+                    brake = if (spd < 90f) 0.8f else 0f,
+                    lateralG = lat,
+                    longitudinalG = (kotlin.math.cos(t * 1.5).toFloat() * 0.8f),
+                    tempFL = 86f + kotlin.math.sin(t).toFloat() * 8f,
+                    tempFR = 84f + kotlin.math.cos(t).toFloat() * 6f,
+                    tempRL = 91f + kotlin.math.sin(t * 1.3).toFloat() * 7f,
+                    tempRR = 89f + kotlin.math.cos(t * 1.3).toFloat() * 7f,
+                    gear = (spd / 45f).toInt().coerceIn(1, 5),
+                    downforceN = spd * 1.4f
+                )
+            )
+        }
+        return list
     }
 }
