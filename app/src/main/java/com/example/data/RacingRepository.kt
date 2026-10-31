@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 
+import com.example.model.Achievement
+import com.example.model.AchievementRegistry
 import com.example.model.ChallengeType
 import com.example.model.DailyChallenge
 import com.example.model.DailyChallengeGenerator
@@ -34,7 +36,15 @@ data class PlayerProfile(
     val lastChallengeDateKey: String = "",
     val allChallengesBonusClaimed: Boolean = false,
     val driverName: String = "Apex Pilot",
-    val driverCountry: String = "US"
+    val driverCountry: String = "US",
+    val totalRaceWins: Int = 0,
+    val totalRacesCompleted: Int = 0,
+    val totalDriftDistanceMeters: Float = 0f,
+    val highestSpeedKmh: Float = 0f,
+    val cleanRacesCount: Int = 0,
+    val wetRaceWinsCount: Int = 0,
+    val equippedBadgeId: String = "badge_rookie",
+    val achievements: List<Achievement> = AchievementRegistry.createDefaultAchievements()
 )
 
 enum class ControlScheme(val displayName: String) {
@@ -123,6 +133,23 @@ class RacingRepository(private val context: Context) {
             DailyChallengeGenerator.generateForDate(todayKey)
         }
 
+        // Milestones & Achievements
+        val totalWins = prefs.getInt("total_race_wins", 0)
+        val totalRaces = prefs.getInt("total_races_completed", 0)
+        val driftMeters = prefs.getFloat("total_drift_meters", 0f)
+        val highestSpeed = prefs.getFloat("highest_speed_kmh", 0f)
+        val cleanRaces = prefs.getInt("clean_races_count", 0)
+        val wetWins = prefs.getInt("wet_race_wins_count", 0)
+        val equippedBadge = prefs.getString("equipped_badge_id", "badge_rookie") ?: "badge_rookie"
+
+        val defaultAchievements = AchievementRegistry.createDefaultAchievements()
+        val achievementsJson = prefs.getString("achievements_json", null)
+        val achievements = if (achievementsJson != null) {
+            parseAchievementsJson(achievementsJson, defaultAchievements)
+        } else {
+            defaultAchievements
+        }
+
         return PlayerProfile(
             credits = credits,
             reputation = rep,
@@ -137,7 +164,15 @@ class RacingRepository(private val context: Context) {
             lastChallengeDateKey = todayKey,
             allChallengesBonusClaimed = allBonusClaimed,
             driverName = driverName,
-            driverCountry = driverCountry
+            driverCountry = driverCountry,
+            totalRaceWins = totalWins,
+            totalRacesCompleted = totalRaces,
+            totalDriftDistanceMeters = driftMeters,
+            highestSpeedKmh = highestSpeed,
+            cleanRacesCount = cleanRaces,
+            wetRaceWinsCount = wetWins,
+            equippedBadgeId = equippedBadge,
+            achievements = achievements
         )
     }
 
@@ -167,6 +202,15 @@ class RacingRepository(private val context: Context) {
             putString("challenge_date_key", profile.lastChallengeDateKey)
             putString("challenges_json", serializeChallengesJson(profile.dailyChallenges))
             putBoolean("all_challenges_bonus_claimed", profile.allChallengesBonusClaimed)
+
+            putInt("total_race_wins", profile.totalRaceWins)
+            putInt("total_races_completed", profile.totalRacesCompleted)
+            putFloat("total_drift_meters", profile.totalDriftDistanceMeters)
+            putFloat("highest_speed_kmh", profile.highestSpeedKmh)
+            putInt("clean_races_count", profile.cleanRacesCount)
+            putInt("wet_race_wins_count", profile.wetRaceWinsCount)
+            putString("equipped_badge_id", profile.equippedBadgeId)
+            putString("achievements_json", serializeAchievementsJson(profile.achievements))
             apply()
         }
     }
@@ -242,10 +286,23 @@ class RacingRepository(private val context: Context) {
         val updatedVehicles = curr.vehicles.map {
             if (it.id == vehicleId) it.copy(isUnlocked = true) else it
         }
+        val unlockedCount = updatedVehicles.count { it.isUnlocked }.toFloat()
+        val updatedAchievements = curr.achievements.map { ach ->
+            if (ach.id == "badge_fleet_3") {
+                val willUnlock = !ach.isUnlocked && unlockedCount >= ach.targetValue
+                ach.copy(
+                    currentValue = unlockedCount,
+                    isUnlocked = ach.isUnlocked || willUnlock,
+                    unlockedTimestamp = if (willUnlock) System.currentTimeMillis() else ach.unlockedTimestamp
+                )
+            } else ach
+        }
+
         val updated = curr.copy(
             credits = curr.credits - vehicle.price,
             vehicles = updatedVehicles,
-            selectedVehicleId = vehicleId
+            selectedVehicleId = vehicleId,
+            achievements = updatedAchievements
         )
         saveProfile(updated)
         return true
@@ -293,7 +350,24 @@ class RacingRepository(private val context: Context) {
             if (it.id == vehicleId) it.copy(upgrades = newUpgrades) else it
         }
 
-        saveProfile(curr.copy(credits = curr.credits - cost, vehicles = updatedVehicles))
+        val hasStage5 = nextStage >= 5 || updatedVehicles.any {
+            it.upgrades.engineStage >= 5 || it.upgrades.tireStage >= 5 ||
+            it.upgrades.transmissionStage >= 5 || it.upgrades.brakesStage >= 5 ||
+            it.upgrades.aeroStage >= 5 || it.upgrades.suspensionStage >= 5
+        }
+
+        val updatedAchievements = curr.achievements.map { ach ->
+            if (ach.id == "badge_tuning_max") {
+                val willUnlock = !ach.isUnlocked && hasStage5
+                ach.copy(
+                    currentValue = if (hasStage5) 1f else 0f,
+                    isUnlocked = ach.isUnlocked || willUnlock,
+                    unlockedTimestamp = if (willUnlock) System.currentTimeMillis() else ach.unlockedTimestamp
+                )
+            } else ach
+        }
+
+        saveProfile(curr.copy(credits = curr.credits - cost, vehicles = updatedVehicles, achievements = updatedAchievements))
         return true
     }
 
@@ -529,6 +603,134 @@ class RacingRepository(private val context: Context) {
                 val p = map[def.id]
                 if (p != null) {
                     def.copy(currentValue = p.first, isClaimed = p.second)
+                } else def
+            }
+        } catch (e: Exception) {
+            defaults
+        }
+    }
+
+    fun recordRaceMilestones(
+        isWin: Boolean,
+        isClean: Boolean,
+        isWetWin: Boolean,
+        maxSpeedKmh: Float,
+        driftMeters: Float
+    ): List<Achievement> {
+        val curr = _profile.value
+        val newWins = if (isWin) curr.totalRaceWins + 1 else curr.totalRaceWins
+        val newRaces = curr.totalRacesCompleted + 1
+        val newDrift = curr.totalDriftDistanceMeters + driftMeters
+        val newHighestSpeed = maxOf(curr.highestSpeedKmh, maxSpeedKmh)
+        val newCleanRaces = if (isClean) curr.cleanRacesCount + 1 else curr.cleanRacesCount
+        val newWetWins = if (isWetWin) curr.wetRaceWinsCount + 1 else curr.wetRaceWinsCount
+
+        val newlyUnlocked = mutableListOf<Achievement>()
+
+        val updatedAchievements = curr.achievements.map { ach ->
+            val newVal = when (ach.id) {
+                "badge_win_1", "badge_win_5", "badge_win_10", "badge_win_25" -> newWins.toFloat()
+                "badge_speed_200", "badge_speed_250", "badge_speed_300" -> newHighestSpeed
+                "badge_drift_500m", "badge_drift_2500m", "badge_drift_10000m" -> newDrift
+                "badge_clean_5" -> newCleanRaces.toFloat()
+                "badge_wet_3" -> newWetWins.toFloat()
+                "badge_fleet_3" -> curr.vehicles.count { it.isUnlocked }.toFloat()
+                "badge_tuning_max" -> if (curr.vehicles.any {
+                        it.upgrades.engineStage >= 5 || it.upgrades.tireStage >= 5 ||
+                        it.upgrades.transmissionStage >= 5 || it.upgrades.brakesStage >= 5 ||
+                        it.upgrades.aeroStage >= 5 || it.upgrades.suspensionStage >= 5
+                    }) 1f else 0f
+                else -> ach.currentValue
+            }
+
+            val willUnlock = !ach.isUnlocked && newVal >= ach.targetValue
+            if (willUnlock) {
+                val unlockedAch = ach.copy(
+                    currentValue = newVal,
+                    isUnlocked = true,
+                    unlockedTimestamp = System.currentTimeMillis()
+                )
+                newlyUnlocked.add(unlockedAch)
+                unlockedAch
+            } else {
+                ach.copy(currentValue = maxOf(ach.currentValue, newVal))
+            }
+        }
+
+        val updatedProfile = curr.copy(
+            totalRaceWins = newWins,
+            totalRacesCompleted = newRaces,
+            totalDriftDistanceMeters = newDrift,
+            highestSpeedKmh = newHighestSpeed,
+            cleanRacesCount = newCleanRaces,
+            wetRaceWinsCount = newWetWins,
+            achievements = updatedAchievements
+        )
+        saveProfile(updatedProfile)
+        return newlyUnlocked
+    }
+
+    fun claimAchievementReward(achievementId: String): Boolean {
+        val curr = _profile.value
+        val ach = curr.achievements.find { it.id == achievementId } ?: return false
+        if (!ach.isUnlocked || ach.isClaimed) return false
+
+        val updated = curr.achievements.map {
+            if (it.id == achievementId) it.copy(isClaimed = true) else it
+        }
+        val newProfile = curr.copy(
+            credits = curr.credits + ach.rewardCredits,
+            reputation = curr.reputation + ach.rewardRep,
+            achievements = updated
+        )
+        saveProfile(newProfile)
+        return true
+    }
+
+    fun equipBadge(badgeId: String): Boolean {
+        val curr = _profile.value
+        val ach = curr.achievements.find { it.id == badgeId } ?: return false
+        if (!ach.isUnlocked) return false
+
+        saveProfile(curr.copy(equippedBadgeId = badgeId))
+        return true
+    }
+
+    private fun serializeAchievementsJson(achievements: List<Achievement>): String {
+        val arr = JSONArray()
+        for (a in achievements) {
+            val obj = JSONObject()
+            obj.put("id", a.id)
+            obj.put("val", a.currentValue.toDouble())
+            obj.put("unlocked", a.isUnlocked)
+            obj.put("claimed", a.isClaimed)
+            obj.put("time", a.unlockedTimestamp ?: 0L)
+            arr.put(obj)
+        }
+        return arr.toString()
+    }
+
+    private fun parseAchievementsJson(jsonStr: String, defaults: List<Achievement>): List<Achievement> {
+        return try {
+            val arr = JSONArray(jsonStr)
+            val jsonMap = mutableMapOf<String, JSONObject>()
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                jsonMap[o.getString("id")] = o
+            }
+            defaults.map { def ->
+                val o = jsonMap[def.id]
+                if (o != null) {
+                    val v = o.optDouble("val", def.currentValue.toDouble()).toFloat()
+                    val u = o.optBoolean("unlocked", def.isUnlocked)
+                    val c = o.optBoolean("claimed", def.isClaimed)
+                    val t = o.optLong("time", 0L)
+                    def.copy(
+                        currentValue = v,
+                        isUnlocked = u,
+                        isClaimed = c,
+                        unlockedTimestamp = if (t > 0L) t else def.unlockedTimestamp
+                    )
                 } else def
             }
         } catch (e: Exception) {

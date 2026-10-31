@@ -72,16 +72,22 @@ import com.example.ui.theme.SurfaceBorder
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextWhite
 
+import androidx.compose.material.icons.filled.MilitaryTech
+import com.example.ui.dialogs.BadgePill
+
 @Composable
 fun CareerScreen(
     profile: PlayerProfile,
     onStartCareerRace: (CareerRaceEvent) -> Unit,
     onClaimChallenge: (String) -> Unit,
-    onClaimAllBonus: () -> Unit
+    onClaimAllBonus: () -> Unit,
+    onOpenAchievements: () -> Unit = {}
 ) {
     val tiers = remember { CareerRegistry.createDefaultTiers() }
     var selectedTierIndex by remember { mutableIntStateOf(0) }
     val currentTier = tiers[selectedTierIndex]
+    val equippedBadge = profile.achievements.find { it.id == profile.equippedBadgeId }
+        ?: profile.achievements.firstOrNull { it.isUnlocked }
 
     LazyColumn(
         modifier = Modifier
@@ -179,6 +185,34 @@ fun CareerScreen(
                         color = TextMuted,
                         fontSize = 12.sp
                     )
+                    Row(
+                        modifier = Modifier.padding(top = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (equippedBadge != null) {
+                            BadgePill(badge = equippedBadge)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(CarbonBlack.copy(alpha = 0.85f))
+                                .border(1.dp, ApexGold.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                                .clickable { onOpenAchievements() }
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                .testTag("career_open_achievements_button")
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(Icons.Default.MilitaryTech, contentDescription = null, tint = ApexGold, modifier = Modifier.size(13.dp))
+                                Text(
+                                    text = "${profile.achievements.count { it.isUnlocked }}/${profile.achievements.size} BADGES",
+                                    color = ApexGold,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

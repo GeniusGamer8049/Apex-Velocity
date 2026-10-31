@@ -39,6 +39,7 @@ data class CarPhysicsState(
     var effectiveTireGrip: Float = 1.0f,
     var boostGauge: Float = 1.0f, // 0..1
     var isBoosting: Boolean = false,
+    var lastCollisionIntensity: Float = 0f,
     var currentLap: Int = 1,
     var lapProgressPct: Float = 0f,
     var currentLapTimeMs: Long = 0L,
@@ -66,7 +67,8 @@ class PhysicsEngine {
         handbrakeInput: Boolean,
         boostInput: Boolean,
         particleSystem: ParticleSystem,
-        dt: Float
+        dt: Float,
+        onCollision: ((intensity: Float) -> Unit)? = null
     ) {
         if (state.raceFinished) return
 
@@ -336,6 +338,10 @@ class PhysicsEngine {
             val ny = (nearestWaypoint.y - state.y) / dist
             state.x = nearestWaypoint.x - nx * maxAllowableOfftrack
             state.y = nearestWaypoint.y - ny * maxAllowableOfftrack
+            val impactSpeed = speedMs
+            val impactIntensity = (impactSpeed / 25f).coerceIn(0.25f, 1.0f)
+            state.lastCollisionIntensity = impactIntensity
+            onCollision?.invoke(impactIntensity)
             state.vx *= -0.35f
             state.vy *= -0.35f
             particleSystem.spawnSparks(state.x, state.y)

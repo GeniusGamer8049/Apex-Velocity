@@ -49,6 +49,13 @@ fun RaceScreen(
         }
     }
 
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        viewModel.soundManager.resume()
+        onDispose {
+            viewModel.soundManager.pause()
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -78,6 +85,9 @@ fun RaceScreen(
             isTimeTrial = viewModel.isTimeTrial,
             ghostFrame = ghostFrame,
             controlScheme = profile.controlScheme,
+            tireCompound = currentVehicle.upgrades.tireCompound,
+            isMuted = profile.isAudioMuted,
+            onToggleAudio = { viewModel.toggleAudio() },
             onThrottleChange = { viewModel.throttleInput = it },
             onBrakeChange = { viewModel.brakeInput = it },
             onSteerChange = { viewModel.steerInput = it },
@@ -115,8 +125,21 @@ fun RaceScreen(
             )
         }
 
-        // 5. Race Results Summary Dialog
-        if (raceResults != null) {
+        // 5. Post-Race Summary Screen
+        val postResult by viewModel.postRaceResult.collectAsState()
+        if (postResult != null) {
+            PostRaceSummaryScreen(
+                result = postResult!!,
+                onContinueToCareer = { viewModel.navigateTo(AppScreen.CAREER) },
+                onRetryRace = { viewModel.restartRace() },
+                onStartNextEvent = { nextEvent -> viewModel.startCareerRace(nextEvent) },
+                onGoToGarage = { viewModel.navigateTo(AppScreen.GARAGE) },
+                onViewLeaderboard = { trackId ->
+                    viewModel.selectLeaderboardTrack(trackId)
+                    viewModel.navigateTo(AppScreen.LEADERBOARD)
+                }
+            )
+        } else if (raceResults != null) {
             val summary = raceResults!!
             RaceSummaryDialog(
                 results = summary,

@@ -72,6 +72,8 @@ import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.DarkSurfaceElevated
 import com.example.ui.theme.SurfaceBorder
 import com.example.ui.theme.TextMuted
+import androidx.compose.material.icons.filled.MilitaryTech
+import com.example.ui.dialogs.BadgePill
 import com.example.ui.theme.TextWhite
 
 @Composable
@@ -83,10 +85,13 @@ fun GarageScreen(
     onEquipTireCompound: (String, TireCompound) -> Unit,
     onUpdateCustomization: (String, String, String?) -> Unit,
     onClaimChallenge: (String) -> Unit = {},
-    onClaimAllBonus: () -> Unit = {}
+    onClaimAllBonus: () -> Unit = {},
+    onOpenAchievements: () -> Unit = {}
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val currentVehicle = profile.vehicles.find { it.id == profile.selectedVehicleId } ?: profile.vehicles.first()
+    val equippedBadge = profile.achievements.find { it.id == profile.equippedBadgeId }
+        ?: profile.achievements.firstOrNull { it.isUnlocked }
 
     LazyColumn(
         modifier = Modifier
@@ -188,6 +193,86 @@ fun GarageScreen(
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
                     )
+                }
+            }
+        }
+
+        // Driver Milestone Profile & Achievements Card
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .border(1.dp, SurfaceBorder, RoundedCornerShape(14.dp))
+                    .clickable { onOpenAchievements() }
+                    .testTag("open_achievements_button"),
+                colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(CircleShape)
+                                .background(ApexGold.copy(alpha = 0.2f))
+                                .border(1.dp, ApexGold, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MilitaryTech,
+                                contentDescription = "Trophies",
+                                tint = ApexGold,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = profile.driverName,
+                                    color = TextWhite,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (equippedBadge != null) {
+                                    BadgePill(badge = equippedBadge)
+                                }
+                            }
+                            Text(
+                                text = "${profile.achievements.count { it.isUnlocked }} of ${profile.achievements.size} Milestones & Badges Unlocked",
+                                color = TextMuted,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(DarkSurface)
+                            .border(1.dp, ApexCyan.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "VIEW BADGES",
+                            color = ApexCyan,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
                 }
             }
         }

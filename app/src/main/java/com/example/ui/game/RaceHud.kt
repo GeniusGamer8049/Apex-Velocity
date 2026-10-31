@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Warning
@@ -57,6 +59,8 @@ import com.example.ui.theme.ApexGold
 import com.example.ui.theme.ApexGreen
 import com.example.ui.theme.ApexOrange
 import com.example.ui.theme.ApexRed
+import com.example.model.TireCompound
+import com.example.ui.components.DynamicWeatherOverlay
 import com.example.ui.theme.CarbonBlack
 import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.SurfaceBorder
@@ -75,6 +79,9 @@ fun RaceHud(
     isTimeTrial: Boolean,
     ghostFrame: GhostFrame?,
     controlScheme: ControlScheme,
+    tireCompound: TireCompound? = null,
+    isMuted: Boolean = false,
+    onToggleAudio: () -> Unit = {},
     onThrottleChange: (Float) -> Unit,
     onBrakeChange: (Float) -> Unit,
     onSteerChange: (Float) -> Unit,
@@ -167,21 +174,43 @@ fun RaceHud(
                     }
                 }
 
-                // Pause button
-                IconButton(
-                    onClick = onPauseClick,
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(CarbonBlack.copy(alpha = 0.85f))
-                        .border(1.dp, SurfaceBorder, CircleShape)
-                        .testTag("pause_button")
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Pause,
-                        contentDescription = "Pause",
-                        tint = TextWhite
-                    )
+                    // Audio toggle button
+                    IconButton(
+                        onClick = onToggleAudio,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(CarbonBlack.copy(alpha = 0.85f))
+                            .border(1.dp, SurfaceBorder, CircleShape)
+                            .testTag("hud_audio_toggle_button")
+                    ) {
+                        Icon(
+                            imageVector = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = if (isMuted) "Unmute Audio" else "Mute Audio",
+                            tint = if (isMuted) ApexOrange else ApexCyan
+                        )
+                    }
+
+                    // Pause button
+                    IconButton(
+                        onClick = onPauseClick,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(CarbonBlack.copy(alpha = 0.85f))
+                            .border(1.dp, SurfaceBorder, CircleShape)
+                            .testTag("pause_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Pause,
+                            contentDescription = "Pause",
+                            tint = TextWhite
+                        )
+                    }
                 }
             }
 
@@ -237,96 +266,12 @@ fun RaceHud(
                 }
             }
 
-            // Dynamic Weather & Surface Condition Indicator
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(CarbonBlack.copy(alpha = 0.85f))
-                    .border(1.dp, SurfaceBorder, RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "${weatherState.currentWeather.iconEmoji} ${weatherState.currentWeather.displayName}",
-                    color = TextWhite,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                // Track Wetness Meter
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(text = "Wetness:", color = TextMuted, fontSize = 11.sp)
-                    LinearProgressIndicator(
-                        progress = { weatherState.trackWetness },
-                        modifier = Modifier.width(55.dp).height(6.dp).clip(RoundedCornerShape(3.dp)),
-                        color = Color(0xFF29B6F6),
-                        trackColor = Color(0xFF263238)
-                    )
-                    Text(
-                        text = "${(weatherState.trackWetness * 100).toInt()}%",
-                        color = Color(0xFF29B6F6),
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-
-                // Surface hazard alert badge if active
-                if (playerState.currentSurfaceHazard != null) {
-                    val hazard = playerState.currentSurfaceHazard!!
-                    val hazardColor = when (hazard) {
-                        SurfaceHazardType.PUDDLE -> Color(0xFF00E5FF)
-                        SurfaceHazardType.ICE_PATCH -> Color(0xFF81D4FA)
-                        SurfaceHazardType.OIL_SLICK -> ApexOrange
-                        SurfaceHazardType.KERB_RUMBLE -> ApexRed
-                        SurfaceHazardType.OFFROAD_GRASS -> Color(0xFF7CB342)
-                        SurfaceHazardType.GRAVEL_TRAP -> Color(0xFFFFB300)
-                    }
-                    Text(
-                        text = "• ${hazard.displayName}",
-                        color = hazardColor,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            // Weather incoming transition notification banner
-            if (weatherState.secondsToTransition in 1..40) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(ApexOrange.copy(alpha = 0.9f))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = "WEATHER ALERT: ${weatherState.forecastWeather.displayName} approaching in ${weatherState.secondsToTransition}s",
-                        color = CarbonBlack,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            // Aquaplaning Warning Banner
-            if (playerState.isAquaplaning) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(ApexRed.copy(alpha = 0.9f))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = "AQUAPLANING! LOSS OF TIRE GRIP — EASE OFF THROTTLE",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
+            // Real-Time Dynamic Weather Status Overlay
+            DynamicWeatherOverlay(
+                weatherState = weatherState,
+                playerState = playerState,
+                tireCompound = tireCompound
+            )
         }
 
         // Telemetry Overlay Box

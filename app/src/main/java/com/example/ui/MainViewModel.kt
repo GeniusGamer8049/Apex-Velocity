@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.ProceduralAudio
+import com.example.audio.RacingSoundManager
 import com.example.data.ControlScheme
 import com.example.data.PlayerProfile
 import com.example.data.RacingRepository
@@ -12,6 +13,7 @@ import com.example.model.CareerRegistry
 import com.example.model.DynamicWeatherState
 import com.example.model.GhostFrame
 import com.example.model.GhostLap
+import com.example.model.SurfaceHazardType
 import com.example.model.TireCompound
 import com.example.model.Track
 import com.example.model.TrackRegistry
@@ -22,8 +24,12 @@ import com.example.physics.AiRacer
 import com.example.physics.CarPhysicsState
 import com.example.physics.ParticleSystem
 import com.example.physics.PhysicsEngine
+import com.example.model.Achievement
 import com.example.model.ChallengeType
 import com.example.model.TelemetryPoint
+import com.example.model.PostRaceResult
+import com.example.model.CareerObjectiveResult
+import com.example.model.RivalFinishResult
 import com.example.ui.dialogs.RaceResults
 import kotlin.math.abs
 import kotlinx.coroutines.Job
@@ -41,7 +47,8 @@ enum class AppScreen {
     TIME_TRIAL,
     LEADERBOARD,
     TELEMETRY,
-    RACING
+    RACING,
+    POST_RACE
 }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -56,6 +63,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val physicsEngine = PhysicsEngine()
     private val aiOpponentManager = AiOpponentManager()
     val particleSystem = ParticleSystem()
+    val soundManager = RacingSoundManager()
     val proceduralAudio = ProceduralAudio()
 
     // Active Race State
@@ -74,6 +82,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val weatherState = MutableStateFlow(DynamicWeatherState())
     val isPaused = MutableStateFlow(false)
     val raceResults = MutableStateFlow<RaceResults?>(null)
+    val postRaceResult = MutableStateFlow<PostRaceResult?>(null)
+    val latestUnlockedBadges = MutableStateFlow<List<Achievement>>(emptyList())
 
     private val _telemetryHistory = MutableStateFlow<List<TelemetryPoint>>(createInitialTelemetry())
     val telemetryHistory: StateFlow<List<TelemetryPoint>> = _telemetryHistory.asStateFlow()
@@ -92,16 +102,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var raceElapsedSec: Float = 0f
     private val recordedLapFrames = mutableListOf<GhostFrame>()
     private var cleanLap: Boolean = true
+    private var maxSpeedReached: Float = 0f
+    private var sessionDriftMeters: Float = 0f
+    private val completedLapTimes = mutableListOf<Long>()
 
     init {
         // Start procedural audio daemon
-        proceduralAudio.isMuted = repository.profile.value.isAudioMuted
-        proceduralAudio.start()
+        val isMuted = repository.profile.value.isAudioMuted
+        soundManager.isMuted = isMuted
+        proceduralAudio.isMuted = isMuted
+        soundManager.start()
     }
 
     override fun onCleared() {
         super.onCleared()
         raceLoopJob?.cancel()
+        soundManager.stop()
         proceduralAudio.stop()
     }
 
@@ -122,7 +138,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleAudio() {
         repository.toggleAudio()
-        proceduralAudio.isMuted = repository.profile.value.isAudioMuted
+        val muted = repository.profile.value.isAudioMuted
+        soundManager.isMuted = muted
+        proceduralAudio.isMuted = muted
     }
 
     fun toggleControlScheme() {
@@ -132,6 +150,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun getGhostLap(trackId: String): GhostLap? = repository.getGhostLap(trackId)
+
+    // --- Achievement & Badge Actions ---
+    fun claimAchievement(id: String) = repository.claimAchievementReward(id)
+    fun equipBadge(id: String) = repository.equipBadge(id)
+    fun dismissUnlockedBadgeAlert() { latestUnlockedBadges.value = emptyList() }
 
     // --- Race Launching ---
     fun startCareerRace(event: CareerRaceEvent) {
@@ -159,10 +182,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         raceLoopJob?.cancel()
         particleSystem.clear()
         recordedLapFrames.clear()
+        completedLapTimes.clear()
+        maxSpeedReached = 0f
+        sessionDriftMeters = 0f
         cleanLap = true
         raceElapsedSec = 0f
         isPaused.value = false
         raceResults.value = null
+        postRaceResult.value = null
+        latestUnlockedBadges.value = emptyList()
 
         val startWp = track.startWaypoint
         playerState.value = CarPhysicsState(
@@ -194,6 +222,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         _currentScreen.value = AppScreen.RACING
+        soundManager.resume()
         startRaceLoop(isDynamic)
     }
 
@@ -202,12 +231,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val dt = 0.016f // 60 FPS update step
 
             while (isActive) {
-                if (!isPaused.value && raceResults.value == null) {
+                if (!isPaused.value && raceResults.value == null && postRaceResult.value == null) {
                     val pState = playerState.value
                     val vehicle = getCurrentVehicle()
                     val wState = weatherState.value
 
                     raceElapsedSec += dt
+                    if (pState.speedKmh > maxSpeedReached) {
+                        maxSpeedReached = pState.speedKmh
+                    }
 
                     // 1. Dynamic Weather Progression
                     if (isDynamic && activeTrack.dynamicWeatherProgression.isNotEmpty()) {
@@ -227,10 +259,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         handbrakeInput = handbrakeInput,
                         boostInput = boostInput,
                         particleSystem = particleSystem,
-                        dt = dt
+                        dt = dt,
+                        onCollision = { impact ->
+                            soundManager.playCollision(impact)
+                            if (impact > 0.35f) {
+                                cleanLap = false
+                            }
+                        }
                     )
 
-                    // 3. AI Racers Update
+                    // 3. AI Racers Update & Bump Collision Detection
                     if (!isTimeTrial && aiRacers.value.isNotEmpty()) {
                         aiOpponentManager.updateAiRacers(
                             racers = aiRacers.value,
@@ -241,6 +279,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             particleSystem = particleSystem,
                             dt = dt
                         )
+
+                        // Car-to-Car contact collision checks
+                        for (ai in aiRacers.value) {
+                            val dx = pState.x - ai.state.x
+                            val dy = pState.y - ai.state.y
+                            val distSq = dx * dx + dy * dy
+                            val contactDist = 28f
+                            if (distSq < contactDist * contactDist && distSq > 0.01f) {
+                                val dist = kotlin.math.sqrt(distSq)
+                                val nx = dx / dist
+                                val ny = dy / dist
+                                val overlap = contactDist - dist
+                                pState.x += nx * overlap * 0.5f
+                                pState.y += ny * overlap * 0.5f
+                                ai.state.x -= nx * overlap * 0.5f
+                                ai.state.y -= ny * overlap * 0.5f
+
+                                val relSpeed = kotlin.math.sqrt(
+                                    (pState.vx - ai.state.vx) * (pState.vx - ai.state.vx) +
+                                    (pState.vy - ai.state.vy) * (pState.vy - ai.state.vy)
+                                )
+                                val impact = (relSpeed / 18f).coerceIn(0.25f, 0.95f)
+                                soundManager.playCollision(impact)
+                                particleSystem.spawnSparks((pState.x + ai.state.x) * 0.5f, (pState.y + ai.state.y) * 0.5f)
+                            }
+                        }
                     }
 
                     // 4. Ghost Car Sample & Player Frame Recording
@@ -298,14 +362,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     if (pState.isDrifting) {
                         repository.updateChallengeProgress(ChallengeType.DRIFT_POINTS, addValue = (abs(pState.slipAngleDeg) * 0.25f).toInt())
+                        val driftSpeedMs = pState.speedKmh / 3.6f
+                        sessionDriftMeters += driftSpeedMs * dt
                     }
 
-                    // 6. Update Procedural Audio
+                    // 6. Update Sound Manager (Engine Revs, Tire Screech, Immersion SFX)
+                    val isKerb = pState.currentSurfaceHazard == SurfaceHazardType.KERB_RUMBLE
+                    val isRain = wState.currentWeather == WeatherType.LIGHT_RAIN || wState.currentWeather == WeatherType.THUNDERSTORM
+
+                    soundManager.updateTelemetry(
+                        rpm = pState.rpm,
+                        maxRpm = vehicle.baseMaxRpm.toFloat(),
+                        currentGear = pState.currentGear,
+                        throttle = throttleInput,
+                        speedKmh = pState.speedKmh,
+                        isDrifting = pState.isDrifting,
+                        slipAngleDeg = pState.slipAngleDeg,
+                        lateralG = pState.lateralG,
+                        isBraking = pState.isBraking,
+                        isBoosting = pState.isBoosting,
+                        isKerbRumble = isKerb,
+                        isRaining = isRain
+                    )
+
                     proceduralAudio.targetRpm = pState.rpm
                     proceduralAudio.isDrifting = pState.isDrifting
-                    proceduralAudio.isRaining = wState.currentWeather == WeatherType.LIGHT_RAIN || wState.currentWeather == WeatherType.THUNDERSTORM
+                    proceduralAudio.isRaining = isRain
 
                     // 7. Check Lap Completion & Race Finish
+                    if (pState.lastLapTimeMs > 0L && (completedLapTimes.isEmpty() || completedLapTimes.size < pState.currentLap - 1)) {
+                        completedLapTimes.add(pState.lastLapTimeMs)
+                    }
+
                     if (pState.currentLap > activeTotalLaps && !isTimeTrial) {
                         handleRaceFinish(pState)
                     }
@@ -404,9 +492,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val cleanBonus = if (cleanLap) 800 else 0
         val driftBonus = (pState.driftScore * 0.5f).toInt()
         val repGain = if (event != null && pos <= 3) event.repReward else 20
+        val totalEarnings = basePrize + cleanBonus + driftBonus
+
+        val currProfile = profile.value
+        val creditsBefore = currProfile.credits
+        val repBefore = currProfile.reputation
 
         if (event != null) {
-            repository.completeRaceEvent(event.id, pos, basePrize + cleanBonus + driftBonus, repGain)
+            repository.completeRaceEvent(event.id, pos, totalEarnings, repGain)
         }
 
         // Daily Challenge Progress on Finish
@@ -424,8 +517,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         repository.updateChallengeProgress(ChallengeType.COMPLETE_LAPS, addValue = activeTotalLaps)
 
+        val unlockedBadges = repository.recordRaceMilestones(
+            isWin = pos == 1,
+            isClean = cleanLap,
+            isWetWin = pos == 1 && isWetRace,
+            maxSpeedKmh = maxSpeedReached.coerceAtLeast(pState.speedKmh),
+            driftMeters = sessionDriftMeters
+        )
+        latestUnlockedBadges.value = unlockedBadges
+
         val vehicle = getCurrentVehicle()
-        val currentBest = profile.value.bestLapTimes[activeTrack.id] ?: Long.MAX_VALUE
+        val currentBest = currProfile.bestLapTimes[activeTrack.id] ?: Long.MAX_VALUE
         val isNewBest = pState.bestLapTimeMs in 1 until currentBest
         if (isNewBest) {
             val newGhost = if (recordedLapFrames.isNotEmpty()) {
@@ -442,6 +544,180 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val trackLeaderboard = repository.getLeaderboard(activeTrack.id)
         val rankOnBoard = trackLeaderboard.find { it.isPlayer }?.rank
 
+        // Capture total race time and lap list
+        val totalRaceTimeMs = (raceElapsedSec * 1000f).toLong().coerceAtLeast(pState.bestLapTimeMs)
+        if (completedLapTimes.size < activeTotalLaps && pState.lastLapTimeMs > 0L) {
+            completedLapTimes.add(pState.lastLapTimeMs)
+        }
+        val finalLapTimes = if (completedLapTimes.isNotEmpty()) {
+            completedLapTimes.toList()
+        } else if (pState.bestLapTimeMs > 0L) {
+            listOf(pState.bestLapTimeMs)
+        } else {
+            listOf(totalRaceTimeMs / activeTotalLaps.coerceAtLeast(1))
+        }
+
+        // Compute Career Goals Progression
+        val allTiers = CareerRegistry.createDefaultTiers()
+        val eventTier = if (event != null) {
+            allTiers.find { it.id == event.tierId } ?: allTiers.first()
+        } else {
+            allTiers.first()
+        }
+
+        val completedSet = currProfile.completedEventIds.toMutableSet()
+        if (event != null) {
+            completedSet.add(event.id)
+        }
+
+        val tierCompletedCount = eventTier.events.count { completedSet.contains(it.id) }
+        val tierTotalCount = eventTier.events.size
+        val isTierTrophyUnlocked = tierCompletedCount >= tierTotalCount
+
+        val currentTierIdx = allTiers.indexOfFirst { it.id == eventTier.id }
+        val nextTier = allTiers.getOrNull(currentTierIdx + 1)
+        val repAfter = repBefore + repGain
+        val creditsAfter = creditsBefore + totalEarnings
+        val repProgressToNextTier = if (nextTier != null && nextTier.requiredRep > 0) {
+            (repAfter.toFloat() / nextTier.requiredRep.toFloat()).coerceIn(0f, 1f)
+        } else 1.0f
+
+        val nextCareerEvent = eventTier.events.firstOrNull { !completedSet.contains(it.id) }
+            ?: nextTier?.events?.firstOrNull { !completedSet.contains(it.id) }
+
+        val careerObjectives = mutableListOf<CareerObjectiveResult>()
+        if (event != null) {
+            careerObjectives.add(
+                CareerObjectiveResult(
+                    title = "Championship Podium (Top 3)",
+                    description = "Finish 1st, 2nd, or 3rd to gain championship reputation",
+                    isAchieved = pos <= 3,
+                    rewardText = if (pos <= 3) "+$repGain REP" else "0 REP"
+                )
+            )
+            careerObjectives.add(
+                CareerObjectiveResult(
+                    title = "Event Victory (1st Place)",
+                    description = "Take the checkered flag in ${event.title}",
+                    isAchieved = pos == 1,
+                    rewardText = if (pos == 1) "+$${event.firstPrize} 1st Prize" else "P1 Required"
+                )
+            )
+            careerObjectives.add(
+                CareerObjectiveResult(
+                    title = "Clean Race Discipline",
+                    description = "Complete all laps with zero severe barrier impacts",
+                    isAchieved = cleanLap,
+                    rewardText = if (cleanLap) "+$800 Purse" else "$0 Penalty"
+                )
+            )
+            careerObjectives.add(
+                CareerObjectiveResult(
+                    title = "Championship Trophy: ${eventTier.trophyName}",
+                    description = "$tierCompletedCount of $tierTotalCount tier events won",
+                    isAchieved = isTierTrophyUnlocked,
+                    rewardText = if (isTierTrophyUnlocked) "🏆 TROPHY CLAIMED!" else "${tierTotalCount - tierCompletedCount} Races Left"
+                )
+            )
+        } else {
+            careerObjectives.add(
+                CareerObjectiveResult(
+                    title = "Circuit Record Target",
+                    description = "Set the fastest all-time lap on ${activeTrack.name}",
+                    isAchieved = isNewBest,
+                    rewardText = if (isNewBest) "★ NEW RECORD" else "P.B. Target"
+                )
+            )
+            careerObjectives.add(
+                CareerObjectiveResult(
+                    title = "Clean Lap Performance",
+                    description = "No grass or wall contacts throughout the session",
+                    isAchieved = cleanLap,
+                    rewardText = if (cleanLap) "+$800 Purse" else "Contact Incurred"
+                )
+            )
+        }
+
+        // Compute Official Rivals Grid
+        val rivals = mutableListOf<RivalFinishResult>()
+        val pTime = totalRaceTimeMs
+        rivals.add(
+            RivalFinishResult(
+                position = pos,
+                name = currProfile.driverName,
+                vehicleName = vehicle.name,
+                totalTimeMs = pTime,
+                deltaFormatted = if (pos == 1) "LEADER" else "+${formatDelta((pos - 1) * 1250L + 540L)}",
+                isPlayer = true
+            )
+        )
+
+        var aiRank = 0
+        for (ai in aiRacers.value) {
+            aiRank++
+            val place = if (aiRank < pos) aiRank else aiRank + 1
+            val deltaMs = if (place < pos) {
+                -((pos - place) * 1250L + 540L)
+            } else {
+                (place - pos) * 1380L + 620L
+            }
+            val aiTime = (pTime + deltaMs).coerceAtLeast(15000L)
+            val deltaStr = if (place == 1) "LEADER" else "+${formatDelta(kotlin.math.abs(deltaMs))}"
+            rivals.add(
+                RivalFinishResult(
+                    position = place,
+                    name = ai.name,
+                    vehicleName = ai.vehicle.name,
+                    totalTimeMs = aiTime,
+                    deltaFormatted = deltaStr,
+                    isPlayer = false
+                )
+            )
+        }
+        rivals.sortBy { it.position }
+
+        val postResult = PostRaceResult(
+            position = pos,
+            totalRacers = aiRacers.value.size + 1,
+            totalRaceTimeMs = totalRaceTimeMs,
+            bestLapTimeMs = pState.bestLapTimeMs,
+            isNewBest = isNewBest,
+            lapTimesMs = finalLapTimes,
+            topSpeedKmh = maxSpeedReached.coerceAtLeast(pState.speedKmh),
+            driftScore = pState.driftScore,
+            isCleanRace = cleanLap,
+            basePrize = basePrize,
+            cleanBonus = cleanBonus,
+            driftBonus = driftBonus,
+            repEarned = repGain,
+            totalEarnings = totalEarnings,
+            creditsBefore = creditsBefore,
+            creditsAfter = creditsAfter,
+            repBefore = repBefore,
+            repAfter = repAfter,
+            isTimeTrial = isTimeTrial,
+            trackId = activeTrack.id,
+            trackName = activeTrack.name,
+            vehicleName = vehicle.name,
+            careerEvent = event,
+            tierName = eventTier.name,
+            tierSubtitle = eventTier.subtitle,
+            tierTrophyName = eventTier.trophyName,
+            tierCompletedEvents = tierCompletedCount,
+            tierTotalEvents = tierTotalCount,
+            isTierTrophyUnlocked = isTierTrophyUnlocked,
+            nextTierName = nextTier?.name,
+            nextTierRequiredRep = nextTier?.requiredRep,
+            repProgressToNextTier = repProgressToNextTier,
+            nextCareerEvent = nextCareerEvent,
+            careerObjectives = careerObjectives,
+            rivalResults = rivals,
+            dailyChallengesUpdated = repository.profile.value.dailyChallenges,
+            unlockedBadges = unlockedBadges
+        )
+
+        postRaceResult.value = postResult
+
         raceResults.value = RaceResults(
             position = pos,
             totalRacers = aiRacers.value.size + 1,
@@ -455,6 +731,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             globalRank = rankOnBoard,
             trackId = activeTrack.id
         )
+
+        soundManager.pause()
+        _currentScreen.value = AppScreen.POST_RACE
+    }
+
+    private fun formatDelta(deltaMs: Long): String {
+        val sec = deltaMs / 1000f
+        return String.format(java.util.Locale.US, "%.2fs", kotlin.math.abs(sec))
     }
 
     fun selectLeaderboardTrack(trackId: String) {
@@ -472,10 +756,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun pauseRace() {
         isPaused.value = true
+        soundManager.pause()
     }
 
     fun resumeRace() {
         isPaused.value = false
+        soundManager.resume()
     }
 
     fun pitStopTireSwap(compound: TireCompound) {
@@ -484,6 +770,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun restartRace() {
+        soundManager.resume()
         if (isTimeTrial) {
             startTimeTrial(activeTrack, weatherState.value.currentWeather, activeGhostLap.value != null)
         } else if (activeCareerEvent != null) {
@@ -494,6 +781,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopRace() {
         raceLoopJob?.cancel()
         particleSystem.clear()
+        soundManager.updateTelemetry(rpm = 900f, speedKmh = 0f, throttle = 0f)
+        soundManager.pause()
         proceduralAudio.targetRpm = 1000f
         proceduralAudio.isDrifting = false
         proceduralAudio.isRaining = false
