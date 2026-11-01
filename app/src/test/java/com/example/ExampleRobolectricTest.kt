@@ -7,6 +7,7 @@ import com.example.model.AchievementCategory
 import com.example.model.AchievementRegistry
 import com.example.model.BadgeRarity
 import com.example.model.CareerRegistry
+import com.example.model.DriverAvatarRegistry
 import com.example.model.TireCompound
 import com.example.model.TrackRegistry
 import com.example.model.VehicleRegistry
@@ -570,6 +571,255 @@ class ExampleRobolectricTest {
         // Second claim attempt returns false
         val secondClaim = repo.claimAchievementReward("badge_win_1")
         assertFalse("Cannot claim reward twice", secondClaim)
+    }
+
+    @Test
+    fun `test driver profile avatar registry presets`() {
+        val avatars = DriverAvatarRegistry.allAvatars
+        assertEquals(8, avatars.size)
+
+        val starter = DriverAvatarRegistry.getAvatarById("avatar_cyber_neon")
+        assertNotNull(starter)
+        assertEquals("Cyber Visor", starter.name)
+        assertEquals(0, starter.requiredRep)
+
+        val outrun = DriverAvatarRegistry.getAvatarById("avatar_sunset_outrun")
+        assertNotNull(outrun)
+        assertEquals("Sunset Outrun", outrun.name)
+        assertEquals(2500, outrun.requiredRep)
+    }
+
+    @Test
+    fun `test custom username nationality and avatar update and persistence`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val repo = RacingRepository(context)
+
+        // Default initial values
+        assertEquals("Apex Pilot", repo.profile.value.driverName)
+        assertEquals("US", repo.profile.value.driverCountry)
+        assertEquals("avatar_cyber_neon", repo.profile.value.avatarId)
+
+        // Update driver profile with custom username, country, and avatar
+        repo.updateDriverProfile("VelocityPhantom", "JP", "avatar_tokyo_drift")
+
+        assertEquals("VelocityPhantom", repo.profile.value.driverName)
+        assertEquals("JP", repo.profile.value.driverCountry)
+        assertEquals("avatar_tokyo_drift", repo.profile.value.avatarId)
+
+        // Re-instantiate repository to verify SharedPreferences persistence
+        val reloadedRepo = RacingRepository(context)
+        assertEquals("VelocityPhantom", reloadedRepo.profile.value.driverName)
+        assertEquals("JP", reloadedRepo.profile.value.driverCountry)
+        assertEquals("avatar_tokyo_drift", reloadedRepo.profile.value.avatarId)
+    }
+
+    @Test
+    fun `test total distance driven and career win percentage statistics`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val repo = RacingRepository(context)
+
+        val initialProfile = repo.profile.value
+        assertEquals(0f, initialProfile.winPercentage, 0.01f)
+        assertEquals(0f, initialProfile.totalDistanceKm, 0.01f)
+
+        // Race 1: Victory (distance = 3,500m)
+        repo.recordRaceMilestones(
+            isWin = true,
+            isClean = true,
+            isWetWin = false,
+            maxSpeedKmh = 220f,
+            driftMeters = 150f,
+            distanceMeters = 3500f,
+            isPodium = true
+        )
+
+        var p = repo.profile.value
+        assertEquals(1, p.totalRaceWins)
+        assertEquals(1, p.totalRacesCompleted)
+        assertEquals(1, p.totalPodiums)
+        assertEquals(3500f, p.totalDistanceDrivenMeters, 0.1f)
+        assertEquals(3.5f, p.totalDistanceKm, 0.01f)
+        assertEquals(100f, p.winPercentage, 0.01f)
+        assertEquals(100f, p.podiumPercentage, 0.01f)
+
+        // Race 2: 2nd Place Podium (distance = 4,500m)
+        repo.recordRaceMilestones(
+            isWin = false,
+            isClean = false,
+            isWetWin = false,
+            maxSpeedKmh = 210f,
+            driftMeters = 80f,
+            distanceMeters = 4500f,
+            isPodium = true
+        )
+
+        p = repo.profile.value
+        assertEquals(1, p.totalRaceWins)
+        assertEquals(2, p.totalRacesCompleted)
+        assertEquals(2, p.totalPodiums)
+        assertEquals(8000f, p.totalDistanceDrivenMeters, 0.1f)
+        assertEquals(8.0f, p.totalDistanceKm, 0.01f)
+        assertEquals(50f, p.winPercentage, 0.01f)
+        assertEquals(100f, p.podiumPercentage, 0.01f)
+
+        // Race 3: 4th Place Non-podium (distance = 2,000m)
+        repo.recordRaceMilestones(
+            isWin = false,
+            isClean = true,
+            isWetWin = false,
+            maxSpeedKmh = 195f,
+            driftMeters = 20f,
+            distanceMeters = 2000f,
+            isPodium = false
+        )
+
+        p = repo.profile.value
+        assertEquals(1, p.totalRaceWins)
+        assertEquals(3, p.totalRacesCompleted)
+        assertEquals(2, p.totalPodiums)
+        assertEquals(10000f, p.totalDistanceDrivenMeters, 0.1f)
+        assertEquals(10.0f, p.totalDistanceKm, 0.01f)
+        assertEquals(33.33f, p.winPercentage, 0.1f)
+        assertEquals(66.67f, p.podiumPercentage, 0.1f)
+
+        // Independent distance recording (e.g., time trial or free run)
+        repo.recordDistanceDriven(2500f)
+        assertEquals(12500f, repo.profile.value.totalDistanceDrivenMeters, 0.1f)
+        assertEquals(12.5f, repo.profile.value.totalDistanceKm, 0.01f)
+    }
+
+    @Test
+    fun `test room database driver profile and game statistics persistence`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = com.example.data.room.AppDatabase.getDatabase(context)
+        val profileDao = db.driverProfileDao()
+        val statsDao = db.gameStatisticsDao()
+
+        // Insert driver profile entity
+        val profile = com.example.data.room.DriverProfile(
+            id = "primary_driver",
+            username = "Apex Champion",
+            avatarPath = "avatar_monaco_gold",
+            totalDistance = 48500.0,
+            totalWins = 15,
+            country = "DE",
+            credits = 50000,
+            reputation = 1200,
+            selectedVehicleId = "apex_gt86",
+            totalRacesCompleted = 20,
+            totalPodiums = 18,
+            totalDriftDistance = 3200.0,
+            highestSpeedKmh = 285f,
+            cleanRacesCount = 12,
+            wetRaceWinsCount = 5,
+            equippedBadgeId = "badge_win_10"
+        )
+        profileDao.insertOrUpdateProfile(profile)
+
+        val retrieved = profileDao.getDriverProfile("primary_driver")
+        assertNotNull("Retrieved profile from Room database must not be null", retrieved)
+        assertEquals("Apex Champion", retrieved!!.username)
+        assertEquals("avatar_monaco_gold", retrieved.avatarPath)
+        assertEquals(48500.0, retrieved.totalDistance, 0.01)
+        assertEquals(15, retrieved.totalWins)
+        assertEquals("DE", retrieved.country)
+
+        // Insert game statistic entity
+        val stat = com.example.data.room.GameStatistics(
+            raceHistory = "Monaco Riviera Grand Prix - Finished 1st / 4",
+            carPerformanceLevels = "Apex GT-86 Coupe (Engine Stage 3, Slick Tires)",
+            trackId = "monaco_riviera",
+            vehicleId = "apex_gt86",
+            position = 1,
+            totalRacers = 4,
+            bestLapTimeMs = 54200L,
+            isWin = true,
+            isPodium = true,
+            isClean = true,
+            maxSpeedKmh = 270f,
+            driftMeters = 450f,
+            distanceMeters = 5200f,
+            earningsCredits = 3500,
+            reputationEarned = 120
+        )
+        statsDao.insertGameStatistic(stat)
+
+        val stats = statsDao.getRecentGameStatistics(5)
+        assertTrue("Recent game statistics should contain the inserted race record", stats.isNotEmpty())
+        val firstStat = stats.first()
+        assertEquals("Monaco Riviera Grand Prix - Finished 1st / 4", firstStat.raceHistory)
+        assertEquals("Apex GT-86 Coupe (Engine Stage 3, Slick Tires)", firstStat.carPerformanceLevels)
+        assertEquals("monaco_riviera", firstStat.trackId)
+        assertEquals(1, firstStat.position)
+        assertTrue(firstStat.isWin)
+        assertEquals(5200f, firstStat.distanceMeters, 0.1f)
+    }
+
+    @Test
+    fun `test data repository abstraction for driver profile and game statistics`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dataRepository = com.example.data.DataRepository(context)
+
+        // Save and retrieve driver profile via repository API
+        val profile = com.example.data.room.DriverProfile(
+            id = "test_driver",
+            username = "SpeedDemon",
+            avatarPath = "avatar_monaco_gold",
+            totalDistance = 15000.0,
+            totalWins = 8,
+            country = "GB"
+        )
+        dataRepository.saveDriverProfile(profile)
+
+        val retrieved = dataRepository.getDriverProfile("test_driver")
+        assertNotNull("Driver profile must be retrieved through DataRepository", retrieved)
+        assertEquals("SpeedDemon", retrieved!!.username)
+        assertEquals(15000.0, retrieved.totalDistance, 0.01)
+
+        // Update identity through repository
+        dataRepository.updateDriverIdentity("VelocityKing", "FR", "avatar_cyber_neon", "test_driver")
+        val updatedIdentity = dataRepository.getDriverProfile("test_driver")
+        assertEquals("VelocityKing", updatedIdentity!!.username)
+        assertEquals("FR", updatedIdentity.country)
+
+        // Add distance through repository
+        dataRepository.addDistanceDriven(2500.0, "test_driver")
+        val updatedDist = dataRepository.getDriverProfile("test_driver")
+        assertEquals(17500.0, updatedDist!!.totalDistance, 0.01)
+
+        // Record race event through repository helper
+        val recordId = dataRepository.recordRaceEvent(
+            trackId = "neon_tokyo",
+            vehicleId = "apex_gt86",
+            position = 1,
+            totalRacers = 4,
+            bestLapTimeMs = 49800L,
+            isWin = true,
+            isPodium = true,
+            isClean = true,
+            maxSpeedKmh = 295f,
+            driftMeters = 800f,
+            distanceMeters = 6400f,
+            earningsCredits = 4500,
+            reputationEarned = 150,
+            raceHistory = "Neon Tokyo Night Sprint - 1st Place",
+            carPerformanceLevels = "Apex GT-86 Coupe Stage 2"
+        )
+        assertTrue("Record ID should be generated by Room", recordId > 0)
+
+        val recentStats = dataRepository.getRecentGameStatistics(10)
+        assertTrue("Recent stats should not be empty", recentStats.isNotEmpty())
+        val latest = recentStats.first()
+        assertEquals("neon_tokyo", latest.trackId)
+        assertEquals("Neon Tokyo Night Sprint - 1st Place", latest.raceHistory)
+        assertEquals("Apex GT-86 Coupe Stage 2", latest.carPerformanceLevels)
+        assertTrue(latest.isWin)
+
+        val winsCount = dataRepository.getTotalWinsRecorded()
+        assertTrue("Wins count should be at least 1", winsCount >= 1)
+
+        val maxSpeed = dataRepository.getMaxSpeedRecorded()
+        assertTrue("Max speed should be recorded", maxSpeed >= 295f)
     }
 }
 

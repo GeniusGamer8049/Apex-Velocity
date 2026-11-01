@@ -40,6 +40,7 @@ import com.example.ui.AppScreen
 import com.example.ui.MainViewModel
 import com.example.ui.components.BadgeUnlockBanner
 import com.example.ui.dialogs.AchievementsDialog
+import com.example.ui.dialogs.DriverProfileDialog
 import com.example.ui.screens.CareerScreen
 import com.example.ui.screens.GarageScreen
 import com.example.ui.screens.LeaderboardScreen
@@ -76,6 +77,7 @@ fun RacingApp(viewModel: MainViewModel) {
     val profile by viewModel.profile.collectAsState()
     val latestUnlockedBadges by viewModel.latestUnlockedBadges.collectAsState()
     var showAchievementsDialog by remember { mutableStateOf(false) }
+    var showDriverProfileDialog by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         when (currentScreen) {
@@ -213,7 +215,8 @@ fun RacingApp(viewModel: MainViewModel) {
                                     },
                                     onClaimChallenge = { viewModel.claimChallenge(it) },
                                     onClaimAllBonus = { viewModel.claimAllDailyBonus() },
-                                    onOpenAchievements = { showAchievementsDialog = true }
+                                    onOpenAchievements = { showAchievementsDialog = true },
+                                    onOpenDriverProfile = { showDriverProfileDialog = true }
                                 )
                             }
 
@@ -223,7 +226,8 @@ fun RacingApp(viewModel: MainViewModel) {
                                     onStartCareerRace = { viewModel.startCareerRace(it) },
                                     onClaimChallenge = { viewModel.claimChallenge(it) },
                                     onClaimAllBonus = { viewModel.claimAllDailyBonus() },
-                                    onOpenAchievements = { showAchievementsDialog = true }
+                                    onOpenAchievements = { showAchievementsDialog = true },
+                                    onOpenDriverProfile = { showDriverProfileDialog = true }
                                 )
                             }
 
@@ -253,7 +257,8 @@ fun RacingApp(viewModel: MainViewModel) {
                                     },
                                     onUpdateDriverProfile = { name, country ->
                                         viewModel.updateDriverProfile(name, country)
-                                    }
+                                    },
+                                    onOpenDriverProfile = { showDriverProfileDialog = true }
                                 )
                             }
 
@@ -294,6 +299,20 @@ fun RacingApp(viewModel: MainViewModel) {
                 onDismiss = { showAchievementsDialog = false },
                 onClaimReward = { achievementId -> viewModel.claimAchievement(achievementId) },
                 onEquipBadge = { achievementId -> viewModel.equipBadge(achievementId) }
+            )
+        }
+
+        // Overlay: Driver Profile Management Dialog
+        if (showDriverProfileDialog) {
+            DriverProfileDialog(
+                profile = profile,
+                onDismiss = { showDriverProfileDialog = false },
+                onSaveProfile = { name, country, avatarId ->
+                    viewModel.updateDriverProfile(name, country, avatarId)
+                },
+                onOpenAchievements = {
+                    showAchievementsDialog = true
+                }
             )
         }
     }

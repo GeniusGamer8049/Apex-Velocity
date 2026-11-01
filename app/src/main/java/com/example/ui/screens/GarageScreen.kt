@@ -73,6 +73,8 @@ import com.example.ui.theme.DarkSurfaceElevated
 import com.example.ui.theme.SurfaceBorder
 import com.example.ui.theme.TextMuted
 import androidx.compose.material.icons.filled.MilitaryTech
+import com.example.ui.components.AvatarSize
+import com.example.ui.components.DriverAvatarView
 import com.example.ui.dialogs.BadgePill
 import com.example.ui.theme.TextWhite
 
@@ -86,7 +88,8 @@ fun GarageScreen(
     onUpdateCustomization: (String, String, String?) -> Unit,
     onClaimChallenge: (String) -> Unit = {},
     onClaimAllBonus: () -> Unit = {},
-    onOpenAchievements: () -> Unit = {}
+    onOpenAchievements: () -> Unit = {},
+    onOpenDriverProfile: () -> Unit = {}
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val currentVehicle = profile.vehicles.find { it.id == profile.selectedVehicleId } ?: profile.vehicles.first()
@@ -203,38 +206,30 @@ fun GarageScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
-                    .border(1.dp, SurfaceBorder, RoundedCornerShape(14.dp))
-                    .clickable { onOpenAchievements() }
-                    .testTag("open_achievements_button"),
+                    .border(1.dp, SurfaceBorder, RoundedCornerShape(14.dp)),
                 colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated)
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(14.dp),
+                        .padding(12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onOpenDriverProfile() },
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(CircleShape)
-                                .background(ApexGold.copy(alpha = 0.2f))
-                                .border(1.dp, ApexGold, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.MilitaryTech,
-                                contentDescription = "Trophies",
-                                tint = ApexGold,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
+                        DriverAvatarView(
+                            avatarId = profile.avatarId,
+                            size = AvatarSize.MEDIUM,
+                            showEquippedBadgeIndicator = true,
+                            hasEquippedBadge = equippedBadge != null
+                        )
 
                         Column {
                             Row(
@@ -247,31 +242,59 @@ fun GarageScreen(
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold
                                 )
+                                Text(
+                                    text = "(${profile.driverCountry})",
+                                    color = ApexCyan,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                                 if (equippedBadge != null) {
                                     BadgePill(badge = equippedBadge)
                                 }
                             }
                             Text(
-                                text = "${profile.achievements.count { it.isUnlocked }} of ${profile.achievements.size} Milestones & Badges Unlocked",
-                                color = TextMuted,
-                                fontSize = 11.sp
+                                text = "${String.format(java.util.Locale.US, "%.1f", profile.winPercentage)}% Win Rate • ${String.format(java.util.Locale.US, "%.1f", profile.totalDistanceKm)} km",
+                                color = ApexGreen,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
 
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(DarkSurface)
-                            .border(1.dp, ApexCyan.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Text(
-                            text = "VIEW BADGES",
-                            color = ApexCyan,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Black
-                        )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(DarkSurface)
+                                .border(1.dp, ApexCyan.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                .clickable { onOpenDriverProfile() }
+                                .padding(horizontal = 9.dp, vertical = 6.dp)
+                                .testTag("open_driver_profile_button")
+                        ) {
+                            Text(
+                                text = "PROFILE",
+                                color = ApexCyan,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(DarkSurface)
+                                .border(1.dp, ApexGold.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                .clickable { onOpenAchievements() }
+                                .padding(horizontal = 9.dp, vertical = 6.dp)
+                                .testTag("open_achievements_button")
+                        ) {
+                            Text(
+                                text = "BADGES",
+                                color = ApexGold,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
                     }
                 }
             }

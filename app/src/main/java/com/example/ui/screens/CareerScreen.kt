@@ -73,6 +73,8 @@ import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextWhite
 
 import androidx.compose.material.icons.filled.MilitaryTech
+import com.example.ui.components.AvatarSize
+import com.example.ui.components.DriverAvatarView
 import com.example.ui.dialogs.BadgePill
 
 @Composable
@@ -81,7 +83,8 @@ fun CareerScreen(
     onStartCareerRace: (CareerRaceEvent) -> Unit,
     onClaimChallenge: (String) -> Unit,
     onClaimAllBonus: () -> Unit,
-    onOpenAchievements: () -> Unit = {}
+    onOpenAchievements: () -> Unit = {},
+    onOpenDriverProfile: () -> Unit = {}
 ) {
     val tiers = remember { CareerRegistry.createDefaultTiers() }
     var selectedTierIndex by remember { mutableIntStateOf(0) }
@@ -190,9 +193,39 @@ fun CareerScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(CarbonBlack.copy(alpha = 0.85f))
+                                .border(1.dp, ApexCyan.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                                .clickable { onOpenDriverProfile() }
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                .testTag("career_open_profile_button")
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                DriverAvatarView(
+                                    avatarId = profile.avatarId,
+                                    size = AvatarSize.SMALL
+                                )
+                                Text(
+                                    text = profile.driverName,
+                                    color = TextWhite,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "${String.format(java.util.Locale.US, "%.0f%%", profile.winPercentage)} Win",
+                                    color = ApexGreen,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
                         if (equippedBadge != null) {
                             BadgePill(badge = equippedBadge)
                         }
+
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(12.dp))

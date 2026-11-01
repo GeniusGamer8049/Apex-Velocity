@@ -10,12 +10,21 @@ import com.example.model.TireCompound
 import com.example.model.Vehicle
 import com.example.model.VehicleRegistry
 import com.example.model.VehicleUpgrades
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
+import com.example.data.room.AppDatabase
+import com.example.data.room.DriverProfileDao
+import com.example.data.room.GameStatisticsDao
+import com.example.data.room.DriverProfile
+import com.example.data.room.GameStatistics
 import com.example.model.Achievement
 import com.example.model.AchievementRegistry
 import com.example.model.ChallengeType
@@ -37,15 +46,27 @@ data class PlayerProfile(
     val allChallengesBonusClaimed: Boolean = false,
     val driverName: String = "Apex Pilot",
     val driverCountry: String = "US",
+    val avatarId: String = "avatar_cyber_neon",
+    val totalDistanceDrivenMeters: Float = 0f,
     val totalRaceWins: Int = 0,
     val totalRacesCompleted: Int = 0,
+    val totalPodiums: Int = 0,
     val totalDriftDistanceMeters: Float = 0f,
     val highestSpeedKmh: Float = 0f,
     val cleanRacesCount: Int = 0,
     val wetRaceWinsCount: Int = 0,
     val equippedBadgeId: String = "badge_rookie",
     val achievements: List<Achievement> = AchievementRegistry.createDefaultAchievements()
-)
+) {
+    val winPercentage: Float
+        get() = if (totalRacesCompleted > 0) (totalRaceWins.toFloat() / totalRacesCompleted.toFloat()) * 100f else 0f
+
+    val totalDistanceKm: Float
+        get() = totalDistanceDrivenMeters / 1000f
+
+    val podiumPercentage: Float
+        get() = if (totalRacesCompleted > 0) (totalPodiums.toFloat() / totalRacesCompleted.toFloat()) * 100f else 0f
+}
 
 enum class ControlScheme(val displayName: String) {
     BUTTONS("Touch Buttons"),
@@ -55,6 +76,11 @@ enum class ControlScheme(val displayName: String) {
 class RacingRepository(private val context: Context) {
 
     private val prefs: SharedPreferences = context.getSharedPreferences("apex_racing_prefs", Context.MODE_PRIVATE)
+    private val appDb = AppDatabase.getDatabase(context)
+    val driverProfileDao: DriverProfileDao = appDb.driverProfileDao()
+    val gameStatisticsDao: GameStatisticsDao = appDb.gameStatisticsDao()
+    val dataRepository: DataRepository = DataRepository(driverProfileDao, gameStatisticsDao)
+    private val repoScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val _profile = MutableStateFlow(loadProfile())
     val profile: StateFlow<PlayerProfile> = _profile.asStateFlow()
@@ -116,6 +142,9 @@ class RacingRepository(private val context: Context) {
         // Driver Profile
         val driverName = prefs.getString("driver_name", "Apex Pilot") ?: "Apex Pilot"
         val driverCountry = prefs.getString("driver_country", "US") ?: "US"
+        val avatarId = prefs.getString("driver_avatar_id", "avatar_cyber_neon") ?: "avatar_cyber_neon"
+        val totalDistance = prefs.getFloat("total_distance_driven_meters", 0f)
+        val totalPodiums = prefs.getInt("total_podiums", 0)
 
         // Completed events
         val completedSet = prefs.getStringSet("completed_events", emptySet()) ?: emptySet()
@@ -165,8 +194,11 @@ class RacingRepository(private val context: Context) {
             allChallengesBonusClaimed = allBonusClaimed,
             driverName = driverName,
             driverCountry = driverCountry,
+            avatarId = avatarId,
+            totalDistanceDrivenMeters = totalDistance,
             totalRaceWins = totalWins,
             totalRacesCompleted = totalRaces,
+            totalPodiums = totalPodiums,
             totalDriftDistanceMeters = driftMeters,
             highestSpeedKmh = highestSpeed,
             cleanRacesCount = cleanRaces,
@@ -196,6 +228,9 @@ class RacingRepository(private val context: Context) {
 
             putString("driver_name", profile.driverName)
             putString("driver_country", profile.driverCountry)
+            putString("driver_avatar_id", profile.avatarId)
+            putFloat("total_distance_driven_meters", profile.totalDistanceDrivenMeters)
+            putInt("total_podiums", profile.totalPodiums)
 
             putStringSet("completed_events", profile.completedEventIds)
 
@@ -212,6 +247,31 @@ class RacingRepository(private val context: Context) {
             putString("equipped_badge_id", profile.equippedBadgeId)
             putString("achievements_json", serializeAchievementsJson(profile.achievements))
             apply()
+        }
+
+        repoScope.launch {
+            try {
+                dataRepository.saveDriverProfile(
+                    DriverProfile(
+                        id = "primary_driver",
+                        username = profile.driverName,
+                        avatarPath = profile.avatarId,
+                        totalDistance = profile.totalDistanceDrivenMeters.toDouble(),
+                        totalWins = profile.totalRaceWins,
+                        country = profile.driverCountry,
+                        credits = profile.credits,
+                        reputation = profile.reputation,
+                        selectedVehicleId = profile.selectedVehicleId,
+                        totalRacesCompleted = profile.totalRacesCompleted,
+                        totalPodiums = profile.totalPodiums,
+                        totalDriftDistance = profile.totalDriftDistanceMeters.toDouble(),
+                        highestSpeedKmh = profile.highestSpeedKmh,
+                        cleanRacesCount = profile.cleanRacesCount,
+                        wetRaceWinsCount = profile.wetRaceWinsCount,
+                        equippedBadgeId = profile.equippedBadgeId
+                    )
+                )
+            } catch (ignored: Exception) {}
         }
     }
 
@@ -420,14 +480,26 @@ class RacingRepository(private val context: Context) {
         }
     }
 
-    fun updateDriverProfile(driverName: String, countryCode: String) {
+    fun updateDriverProfile(driverName: String, countryCode: String, avatarId: String? = null) {
         val curr = _profile.value
         saveProfile(
             curr.copy(
                 driverName = driverName.trim().ifEmpty { "Apex Pilot" },
-                driverCountry = countryCode.trim().uppercase().ifEmpty { "US" }
+                driverCountry = countryCode.trim().uppercase().ifEmpty { "US" },
+                avatarId = avatarId ?: curr.avatarId
             )
         )
+    }
+
+    fun updateAvatar(avatarId: String) {
+        val curr = _profile.value
+        saveProfile(curr.copy(avatarId = avatarId))
+    }
+
+    fun recordDistanceDriven(distanceMeters: Float) {
+        if (distanceMeters <= 0f) return
+        val curr = _profile.value
+        saveProfile(curr.copy(totalDistanceDrivenMeters = curr.totalDistanceDrivenMeters + distanceMeters))
     }
 
     fun getLeaderboard(trackId: String): List<com.example.model.LeaderboardEntry> {
@@ -615,11 +687,15 @@ class RacingRepository(private val context: Context) {
         isClean: Boolean,
         isWetWin: Boolean,
         maxSpeedKmh: Float,
-        driftMeters: Float
+        driftMeters: Float,
+        distanceMeters: Float = 0f,
+        isPodium: Boolean = false
     ): List<Achievement> {
         val curr = _profile.value
         val newWins = if (isWin) curr.totalRaceWins + 1 else curr.totalRaceWins
         val newRaces = curr.totalRacesCompleted + 1
+        val newPodiums = if (isPodium || isWin) curr.totalPodiums + 1 else curr.totalPodiums
+        val newDistance = curr.totalDistanceDrivenMeters + distanceMeters
         val newDrift = curr.totalDriftDistanceMeters + driftMeters
         val newHighestSpeed = maxOf(curr.highestSpeedKmh, maxSpeedKmh)
         val newCleanRaces = if (isClean) curr.cleanRacesCount + 1 else curr.cleanRacesCount
@@ -660,6 +736,8 @@ class RacingRepository(private val context: Context) {
         val updatedProfile = curr.copy(
             totalRaceWins = newWins,
             totalRacesCompleted = newRaces,
+            totalPodiums = newPodiums,
+            totalDistanceDrivenMeters = newDistance,
             totalDriftDistanceMeters = newDrift,
             highestSpeedKmh = newHighestSpeed,
             cleanRacesCount = newCleanRaces,
@@ -667,6 +745,34 @@ class RacingRepository(private val context: Context) {
             achievements = updatedAchievements
         )
         saveProfile(updatedProfile)
+
+        repoScope.launch {
+            try {
+                val vehicleName = curr.vehicles.find { it.id == curr.selectedVehicleId }?.name ?: "Apex GT-86 Coupe"
+                val upgrades = curr.vehicles.find { it.id == curr.selectedVehicleId }?.upgrades
+                val perfLevels = "Engine St.${upgrades?.engineStage ?: 0}, Tire St.${upgrades?.tireStage ?: 0}, Aero St.${upgrades?.aeroStage ?: 0}"
+                dataRepository.insertGameStatistic(
+                    GameStatistics(
+                        raceHistory = "Race finish: Pos ${if (isWin) 1 else if (isPodium) 2 else 4}/4, Max ${maxSpeedKmh.toInt()} km/h",
+                        carPerformanceLevels = "$vehicleName ($perfLevels)",
+                        trackId = "",
+                        vehicleId = curr.selectedVehicleId,
+                        position = if (isWin) 1 else if (isPodium) 2 else 4,
+                        totalRacers = 4,
+                        bestLapTimeMs = 0L,
+                        isWin = isWin,
+                        isPodium = isPodium,
+                        isClean = isClean,
+                        maxSpeedKmh = maxSpeedKmh,
+                        driftMeters = driftMeters,
+                        distanceMeters = distanceMeters,
+                        earningsCredits = 0,
+                        reputationEarned = 0
+                    )
+                )
+            } catch (ignored: Exception) {}
+        }
+
         return newlyUnlocked
     }
 

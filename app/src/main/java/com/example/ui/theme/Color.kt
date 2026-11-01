@@ -14,6 +14,7 @@ val ApexRed = Color(0xFFFF2A4B)
 val ApexGreen = Color(0xFF00E676)
 val ApexYellow = Color(0xFFFFD600)
 val ApexGold = Color(0xFFFFC107)
+val ApexPurple = Color(0xFFD500F9)
 
 val TextWhite = Color(0xFFF0F4FC)
 val TextMuted = Color(0xFF8A93A8)

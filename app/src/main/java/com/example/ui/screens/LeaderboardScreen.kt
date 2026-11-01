@@ -101,7 +101,8 @@ fun LeaderboardScreen(
     onSelectTrack: (String) -> Unit,
     getLeaderboard: (String) -> List<LeaderboardEntry>,
     onStartTimeTrial: (Track) -> Unit,
-    onUpdateDriverProfile: (name: String, country: String) -> Unit
+    onUpdateDriverProfile: (name: String, country: String) -> Unit,
+    onOpenDriverProfile: (() -> Unit)? = null
 ) {
     var activeFilter by remember { mutableStateOf(LeaderboardFilter.GLOBAL) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
@@ -185,7 +186,13 @@ fun LeaderboardScreen(
                         .clip(RoundedCornerShape(20.dp))
                         .background(DarkSurfaceElevated)
                         .border(1.dp, SurfaceBorder, RoundedCornerShape(20.dp))
-                        .clickable { showEditProfileDialog = true }
+                        .clickable {
+                            if (onOpenDriverProfile != null) {
+                                onOpenDriverProfile()
+                            } else {
+                                showEditProfileDialog = true
+                            }
+                        }
                         .padding(horizontal = 10.dp, vertical = 6.dp)
                         .testTag("edit_driver_tag_button")
                 ) {

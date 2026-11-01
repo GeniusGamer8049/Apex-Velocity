@@ -6,8 +6,12 @@ import androidx.lifecycle.viewModelScope
 import com.example.audio.ProceduralAudio
 import com.example.audio.RacingSoundManager
 import com.example.data.ControlScheme
+import com.example.data.DataRepository
 import com.example.data.PlayerProfile
 import com.example.data.RacingRepository
+import com.example.data.room.DriverProfile
+import com.example.data.room.GameStatistics
+import kotlinx.coroutines.flow.Flow
 import com.example.model.CareerRaceEvent
 import com.example.model.CareerRegistry
 import com.example.model.DynamicWeatherState
@@ -54,7 +58,10 @@ enum class AppScreen {
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = RacingRepository(application)
+    val dataRepository: DataRepository = repository.dataRepository
     val profile: StateFlow<PlayerProfile> = repository.profile
+    val dbDriverProfile: Flow<DriverProfile?> = dataRepository.driverProfileFlow
+    val recentGameStatistics: Flow<List<GameStatistics>> = dataRepository.recentGameStatisticsFlow
 
     private val _currentScreen = MutableStateFlow(AppScreen.GARAGE)
     val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
@@ -104,6 +111,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var cleanLap: Boolean = true
     private var maxSpeedReached: Float = 0f
     private var sessionDriftMeters: Float = 0f
+    private var sessionDistanceMeters: Float = 0f
     private val completedLapTimes = mutableListOf<Long>()
 
     init {
@@ -185,6 +193,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         completedLapTimes.clear()
         maxSpeedReached = 0f
         sessionDriftMeters = 0f
+        sessionDistanceMeters = 0f
         cleanLap = true
         raceElapsedSec = 0f
         isPaused.value = false
@@ -356,7 +365,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _telemetryHistory.value = hist
                     }
 
-                    // 5c. Track Real-Time Daily Challenges
+                    // 5c. Track Real-Time Daily Challenges & Distance
+                    val currentSpeedMs = pState.speedKmh / 3.6f
+                    sessionDistanceMeters += currentSpeedMs * dt
+
                     if (pState.speedKmh > 100f) {
                         repository.updateChallengeProgress(ChallengeType.TOP_SPEED, absoluteValue = pState.speedKmh.toInt())
                     }
@@ -522,8 +534,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             isClean = cleanLap,
             isWetWin = pos == 1 && isWetRace,
             maxSpeedKmh = maxSpeedReached.coerceAtLeast(pState.speedKmh),
-            driftMeters = sessionDriftMeters
+            driftMeters = sessionDriftMeters,
+            distanceMeters = sessionDistanceMeters,
+            isPodium = pos <= 3
         )
+        sessionDistanceMeters = 0f
         latestUnlockedBadges.value = unlockedBadges
 
         val vehicle = getCurrentVehicle()
@@ -745,8 +760,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         leaderboardSelectedTrackId.value = trackId
     }
 
-    fun updateDriverProfile(name: String, country: String) {
-        repository.updateDriverProfile(name, country)
+    fun updateDriverProfile(name: String, country: String, avatarId: String? = null) {
+        repository.updateDriverProfile(name, country, avatarId)
+    }
+
+    fun updateAvatar(avatarId: String) {
+        repository.updateAvatar(avatarId)
     }
 
     fun getLeaderboard(trackId: String) = repository.getLeaderboard(trackId)
@@ -781,6 +800,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopRace() {
         raceLoopJob?.cancel()
         particleSystem.clear()
+        if (sessionDistanceMeters > 0f) {
+            repository.recordDistanceDriven(sessionDistanceMeters)
+            sessionDistanceMeters = 0f
+        }
         soundManager.updateTelemetry(rpm = 900f, speedKmh = 0f, throttle = 0f)
         soundManager.pause()
         proceduralAudio.targetRpm = 1000f
