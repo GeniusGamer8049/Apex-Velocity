@@ -50,11 +50,15 @@ import com.example.ui.theme.SurfaceBorder
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextWhite
 
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+
 @Composable
 fun TelemetryScreen(
     vehicle: Vehicle,
     telemetryHistory: List<TelemetryPoint>,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenPerformanceAnalytics: () -> Unit = {}
 ) {
     val current = telemetryHistory.lastOrNull()
 
@@ -119,6 +123,47 @@ fun TelemetryScreen(
                         Box(modifier = Modifier.size(7.dp).background(ApexGreen, androidx.compose.foundation.shape.CircleShape))
                         Text("LIVE TELEMETRY", color = ApexGreen, fontSize = 10.sp, fontWeight = FontWeight.Black)
                     }
+                }
+            }
+        }
+
+        // Long-term Performance Trends Banner
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenPerformanceAnalytics() }
+                    .testTag("open_performance_analytics_button"),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
+                border = androidx.compose.foundation.BorderStroke(1.dp, ApexCyan)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(ApexCyan.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Speed, contentDescription = null, tint = ApexCyan, modifier = Modifier.size(18.dp))
+                        }
+                        Column {
+                            Text("Car Performance Evolution Over Time", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TextWhite)
+                            Text("D3/Recharts curves • Speed & lap trends from GameStatistics", fontSize = 11.sp, color = TextMuted)
+                        }
+                    }
+                    Text("TRENDS >", fontWeight = FontWeight.Black, fontSize = 11.sp, color = ApexCyan)
                 }
             }
         }

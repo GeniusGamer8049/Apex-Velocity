@@ -27,6 +27,9 @@ class DataRepository(
         gameStatisticsDao = AppDatabase.getDatabase(context).gameStatisticsDao()
     )
 
+    val driverProfileRepository = DriverProfileRepository(driverProfileDao, ioDispatcher)
+    val gameStatisticsRepository = GameStatisticsRepository(gameStatisticsDao, ioDispatcher)
+
     // ========================================================================
     // Driver Profile APIs
     // ========================================================================

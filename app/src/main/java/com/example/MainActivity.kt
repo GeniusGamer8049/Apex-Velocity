@@ -42,9 +42,12 @@ import com.example.ui.components.BadgeUnlockBanner
 import com.example.ui.dialogs.AchievementsDialog
 import com.example.ui.dialogs.DriverProfileDialog
 import com.example.ui.screens.CareerScreen
+import com.example.ui.screens.DriverProfileScreen
 import com.example.ui.screens.GarageScreen
 import com.example.ui.screens.LeaderboardScreen
+import com.example.ui.screens.PerformanceAnalyticsScreen
 import com.example.ui.screens.PostRaceSummaryScreen
+import com.example.ui.screens.RaceHistoryScreen
 import com.example.ui.screens.RaceScreen
 import com.example.ui.screens.TelemetryScreen
 import com.example.ui.screens.TimeTrialScreen
@@ -216,7 +219,7 @@ fun RacingApp(viewModel: MainViewModel) {
                                     onClaimChallenge = { viewModel.claimChallenge(it) },
                                     onClaimAllBonus = { viewModel.claimAllDailyBonus() },
                                     onOpenAchievements = { showAchievementsDialog = true },
-                                    onOpenDriverProfile = { showDriverProfileDialog = true }
+                                    onOpenDriverProfile = { viewModel.navigateTo(AppScreen.DRIVER_PROFILE) }
                                 )
                             }
 
@@ -227,7 +230,7 @@ fun RacingApp(viewModel: MainViewModel) {
                                     onClaimChallenge = { viewModel.claimChallenge(it) },
                                     onClaimAllBonus = { viewModel.claimAllDailyBonus() },
                                     onOpenAchievements = { showAchievementsDialog = true },
-                                    onOpenDriverProfile = { showDriverProfileDialog = true }
+                                    onOpenDriverProfile = { viewModel.navigateTo(AppScreen.DRIVER_PROFILE) }
                                 )
                             }
 
@@ -258,7 +261,7 @@ fun RacingApp(viewModel: MainViewModel) {
                                     onUpdateDriverProfile = { name, country ->
                                         viewModel.updateDriverProfile(name, country)
                                     },
-                                    onOpenDriverProfile = { showDriverProfileDialog = true }
+                                    onOpenDriverProfile = { viewModel.navigateTo(AppScreen.DRIVER_PROFILE) }
                                 )
                             }
 
@@ -267,7 +270,32 @@ fun RacingApp(viewModel: MainViewModel) {
                                 TelemetryScreen(
                                     vehicle = viewModel.getCurrentVehicle(),
                                     telemetryHistory = telemetryHistory,
-                                    onBack = { viewModel.navigateTo(AppScreen.GARAGE) }
+                                    onBack = { viewModel.navigateTo(AppScreen.GARAGE) },
+                                    onOpenPerformanceAnalytics = { viewModel.navigateTo(AppScreen.PERFORMANCE_ANALYTICS) }
+                                )
+                            }
+
+                            AppScreen.DRIVER_PROFILE -> {
+                                DriverProfileScreen(
+                                    viewModel = viewModel,
+                                    onBack = { viewModel.navigateTo(AppScreen.GARAGE) },
+                                    onOpenRaceHistory = { viewModel.navigateTo(AppScreen.RACE_HISTORY) }
+                                )
+                            }
+
+                            AppScreen.RACE_HISTORY -> {
+                                RaceHistoryScreen(
+                                    viewModel = viewModel,
+                                    onBack = { viewModel.navigateTo(AppScreen.GARAGE) },
+                                    onGoToRace = { viewModel.navigateTo(AppScreen.CAREER) }
+                                )
+                            }
+
+                            AppScreen.PERFORMANCE_ANALYTICS -> {
+                                PerformanceAnalyticsScreen(
+                                    viewModel = viewModel,
+                                    onBack = { viewModel.navigateTo(AppScreen.TELEMETRY) },
+                                    onGoToRace = { viewModel.navigateTo(AppScreen.CAREER) }
                                 )
                             }
 

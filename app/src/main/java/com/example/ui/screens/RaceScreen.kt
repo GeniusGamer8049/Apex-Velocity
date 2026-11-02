@@ -13,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.example.ui.AppScreen
 import com.example.ui.MainViewModel
+import com.example.ui.components.RaceCountdown
 import com.example.ui.dialogs.PauseMenuDialog
 import com.example.ui.dialogs.RaceSummaryDialog
 import com.example.ui.game.GameCanvas
@@ -30,8 +31,10 @@ fun RaceScreen(
     val ghostFrame by viewModel.ghostFrame.collectAsState()
     val weatherState by viewModel.weatherState.collectAsState()
     val isPaused by viewModel.isPaused.collectAsState()
+    val isCountdownActive by viewModel.isCountdownActive.collectAsState()
     val raceResults by viewModel.raceResults.collectAsState()
     val telemetryHistory by viewModel.telemetryHistory.collectAsState()
+    val raceDurationMs by viewModel.raceDurationMillis.collectAsState()
 
     var showTelemetryScreen by remember { mutableStateOf(false) }
 
@@ -87,6 +90,10 @@ fun RaceScreen(
             controlScheme = profile.controlScheme,
             tireCompound = currentVehicle.upgrades.tireCompound,
             isMuted = profile.isAudioMuted,
+            raceDurationMs = raceDurationMs,
+            isRaceRunning = !isPaused && !isCountdownActive && raceResults == null,
+            controlsEnabled = !isCountdownActive && !isPaused,
+            onToggleRaceTimer = { viewModel.toggleRacePause() },
             onToggleAudio = { viewModel.toggleAudio() },
             onThrottleChange = { viewModel.throttleInput = it },
             onBrakeChange = { viewModel.brakeInput = it },
@@ -95,6 +102,15 @@ fun RaceScreen(
             onBoostChange = { viewModel.boostInput = it },
             onPauseClick = { viewModel.pauseRace() }
         )
+
+        // 3. Pre-Race 3-2-1 Countdown Sequence
+        if (isCountdownActive && raceResults == null && !isPaused) {
+            RaceCountdown(
+                onCountdownFinished = {
+                    viewModel.completeCountdown()
+                }
+            )
+        }
 
         // 3. Pause & Pit Stop Dialog
         if (isPaused && raceResults == null && !showTelemetryScreen) {

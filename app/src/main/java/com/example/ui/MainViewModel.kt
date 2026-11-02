@@ -52,16 +52,22 @@ enum class AppScreen {
     LEADERBOARD,
     TELEMETRY,
     RACING,
-    POST_RACE
+    POST_RACE,
+    DRIVER_PROFILE,
+    RACE_HISTORY,
+    PERFORMANCE_ANALYTICS
 }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = RacingRepository(application)
     val dataRepository: DataRepository = repository.dataRepository
+    val driverProfileRepository: com.example.data.DriverProfileRepository = repository.driverProfileRepository
+    val gameStatisticsRepository: com.example.data.GameStatisticsRepository = repository.gameStatisticsRepository
     val profile: StateFlow<PlayerProfile> = repository.profile
-    val dbDriverProfile: Flow<DriverProfile?> = dataRepository.driverProfileFlow
-    val recentGameStatistics: Flow<List<GameStatistics>> = dataRepository.recentGameStatisticsFlow
+    val dbDriverProfile: Flow<DriverProfile?> = driverProfileRepository.driverProfileFlow
+    val recentGameStatistics: Flow<List<GameStatistics>> = gameStatisticsRepository.recentGameStatisticsFlow
+    val allGameStatistics: Flow<List<GameStatistics>> = gameStatisticsRepository.allGameStatisticsFlow
 
     private val _currentScreen = MutableStateFlow(AppScreen.GARAGE)
     val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
@@ -90,6 +96,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isPaused = MutableStateFlow(false)
     val raceResults = MutableStateFlow<RaceResults?>(null)
     val postRaceResult = MutableStateFlow<PostRaceResult?>(null)
+    val raceDurationMillis = MutableStateFlow(0L)
+    val isCountdownActive = MutableStateFlow(true)
     val latestUnlockedBadges = MutableStateFlow<List<Achievement>>(emptyList())
 
     private val _telemetryHistory = MutableStateFlow<List<TelemetryPoint>>(createInitialTelemetry())
@@ -196,6 +204,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         sessionDistanceMeters = 0f
         cleanLap = true
         raceElapsedSec = 0f
+        raceDurationMillis.value = 0L
+        isCountdownActive.value = true
+        throttleInput = 0f
+        brakeInput = 0f
+        steerInput = 0f
+        handbrakeInput = false
+        boostInput = false
         isPaused.value = false
         raceResults.value = null
         postRaceResult.value = null
@@ -240,12 +255,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val dt = 0.016f // 60 FPS update step
 
             while (isActive) {
-                if (!isPaused.value && raceResults.value == null && postRaceResult.value == null) {
+                if (!isPaused.value && !isCountdownActive.value && raceResults.value == null && postRaceResult.value == null) {
                     val pState = playerState.value
                     val vehicle = getCurrentVehicle()
                     val wState = weatherState.value
 
                     raceElapsedSec += dt
+                    raceDurationMillis.value = (raceElapsedSec * 1000f).toLong()
                     if (pState.speedKmh > maxSpeedReached) {
                         maxSpeedReached = pState.speedKmh
                     }
@@ -781,6 +797,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun resumeRace() {
         isPaused.value = false
         soundManager.resume()
+    }
+
+    fun toggleRacePause() {
+        if (isPaused.value) {
+            resumeRace()
+        } else {
+            pauseRace()
+        }
+    }
+
+    fun completeCountdown() {
+        isCountdownActive.value = false
+    }
+
+    fun triggerRaceCountdown() {
+        isCountdownActive.value = true
+        raceElapsedSec = 0f
+        raceDurationMillis.value = 0L
+        throttleInput = 0f
+        brakeInput = 0f
+        steerInput = 0f
+        handbrakeInput = false
+        boostInput = false
     }
 
     fun pitStopTireSwap(compound: TireCompound) {

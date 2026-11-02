@@ -80,6 +80,8 @@ class RacingRepository(private val context: Context) {
     val driverProfileDao: DriverProfileDao = appDb.driverProfileDao()
     val gameStatisticsDao: GameStatisticsDao = appDb.gameStatisticsDao()
     val dataRepository: DataRepository = DataRepository(driverProfileDao, gameStatisticsDao)
+    val driverProfileRepository: DriverProfileRepository = dataRepository.driverProfileRepository
+    val gameStatisticsRepository: GameStatisticsRepository = dataRepository.gameStatisticsRepository
     private val repoScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val _profile = MutableStateFlow(loadProfile())

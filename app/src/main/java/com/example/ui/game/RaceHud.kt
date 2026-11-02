@@ -39,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
@@ -61,6 +62,7 @@ import com.example.ui.theme.ApexOrange
 import com.example.ui.theme.ApexRed
 import com.example.model.TireCompound
 import com.example.ui.components.DynamicWeatherOverlay
+import com.example.ui.components.RaceTimerHud
 import com.example.ui.theme.CarbonBlack
 import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.SurfaceBorder
@@ -87,7 +89,11 @@ fun RaceHud(
     onSteerChange: (Float) -> Unit,
     onHandbrakeChange: (Boolean) -> Unit,
     onBoostChange: (Boolean) -> Unit,
-    onPauseClick: () -> Unit
+    onPauseClick: () -> Unit,
+    raceDurationMs: Long = 0L,
+    isRaceRunning: Boolean = true,
+    controlsEnabled: Boolean = true,
+    onToggleRaceTimer: () -> Unit = onPauseClick
 ) {
     var showTelemetry by remember { mutableStateOf(false) }
 
@@ -214,56 +220,70 @@ fun RaceHud(
                 }
             }
 
-            // Lap Times & Ghost Delta Bar
+            // Lap Times, Ghost Delta Bar, and Race Duration Timer
             Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(CarbonBlack.copy(alpha = 0.8f))
-                    .border(1.dp, SurfaceBorder, RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(text = "CURRENT", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        text = formatLapTime(playerState.currentLapTimeMs),
-                        color = TextWhite,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-
-                if (playerState.bestLapTimeMs > 0L) {
+                // Lap Times & Ghost Delta Bar
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(CarbonBlack.copy(alpha = 0.8f))
+                        .border(1.dp, SurfaceBorder, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Column {
-                        Text(text = "BEST", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text(text = "CURRENT", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                         Text(
-                            text = formatLapTime(playerState.bestLapTimeMs),
-                            color = ApexGold,
+                            text = formatLapTime(playerState.currentLapTimeMs),
+                            color = TextWhite,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
                         )
                     }
-                }
 
-                // Ghost split delta
-                if (isTimeTrial && ghostFrame != null) {
-                    val deltaMs = playerState.currentLapTimeMs - ghostFrame.timeMs
-                    val deltaSec = deltaMs / 1000f
-                    val isAhead = deltaSec <= 0f
-                    Column {
-                        Text(text = "GHOST DELTA", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            text = if (isAhead) String.format("-%.2fs", abs(deltaSec)) else String.format("+%.2fs", deltaSec),
-                            color = if (isAhead) ApexGreen else ApexRed,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
+                    if (playerState.bestLapTimeMs > 0L) {
+                        Column {
+                            Text(text = "BEST", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                text = formatLapTime(playerState.bestLapTimeMs),
+                                color = ApexGold,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+
+                    // Ghost split delta
+                    if (isTimeTrial && ghostFrame != null) {
+                        val deltaMs = playerState.currentLapTimeMs - ghostFrame.timeMs
+                        val deltaSec = deltaMs / 1000f
+                        val isAhead = deltaSec <= 0f
+                        Column {
+                            Text(text = "GHOST DELTA", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                text = if (isAhead) String.format("-%.2fs", abs(deltaSec)) else String.format("+%.2fs", deltaSec),
+                                color = if (isAhead) ApexGreen else ApexRed,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
                     }
                 }
+
+                // Live Active Gameplay Race Timer with Start/Stop Controls
+                RaceTimerHud(
+                    elapsedMillis = raceDurationMs,
+                    isRunning = isRaceRunning,
+                    onToggleRunning = onToggleRaceTimer
+                )
             }
 
             // Real-Time Dynamic Weather Status Overlay
@@ -435,7 +455,10 @@ fun RaceHud(
 
             // Bottom Driver Controls: Steering Left/Right, Handbrake, Brake, Gas
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp)
+                    .alpha(if (controlsEnabled) 1.0f else 0.4f),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Bottom
             ) {
@@ -449,14 +472,16 @@ fun RaceHud(
                                 .clip(CircleShape)
                                 .background(DarkSurface.copy(alpha = 0.85f))
                                 .border(1.5.dp, SurfaceBorder, CircleShape)
-                                .pointerInput(Unit) {
-                                    detectTapGestures(
-                                        onPress = {
-                                            onSteerChange(-1.0f)
-                                            tryAwaitRelease()
-                                            onSteerChange(0f)
-                                        }
-                                    )
+                                .pointerInput(controlsEnabled) {
+                                    if (controlsEnabled) {
+                                        detectTapGestures(
+                                            onPress = {
+                                                onSteerChange(-1.0f)
+                                                tryAwaitRelease()
+                                                onSteerChange(0f)
+                                            }
+                                        )
+                                    }
                                 }
                                 .testTag("steer_left_button"),
                             contentAlignment = Alignment.Center
@@ -471,14 +496,16 @@ fun RaceHud(
                                 .clip(CircleShape)
                                 .background(DarkSurface.copy(alpha = 0.85f))
                                 .border(1.5.dp, SurfaceBorder, CircleShape)
-                                .pointerInput(Unit) {
-                                    detectTapGestures(
-                                        onPress = {
-                                            onSteerChange(1.0f)
-                                            tryAwaitRelease()
-                                            onSteerChange(0f)
-                                        }
-                                    )
+                                .pointerInput(controlsEnabled) {
+                                    if (controlsEnabled) {
+                                        detectTapGestures(
+                                            onPress = {
+                                                onSteerChange(1.0f)
+                                                tryAwaitRelease()
+                                                onSteerChange(0f)
+                                            }
+                                        )
+                                    }
                                 }
                                 .testTag("steer_right_button"),
                             contentAlignment = Alignment.Center
@@ -488,7 +515,7 @@ fun RaceHud(
                     }
                 } else {
                     // Virtual Steering Wheel
-                    VirtualSteeringWheel(onSteerChange = onSteerChange)
+                    VirtualSteeringWheel(onSteerChange = onSteerChange, enabled = controlsEnabled)
                 }
 
                 // Middle: Handbrake (Drift initiation)
@@ -498,14 +525,16 @@ fun RaceHud(
                         .clip(CircleShape)
                         .background(if (playerState.isDrifting) ApexOrange else DarkSurface.copy(alpha = 0.85f))
                         .border(1.5.dp, ApexOrange, CircleShape)
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onPress = {
-                                    onHandbrakeChange(true)
-                                    tryAwaitRelease()
-                                    onHandbrakeChange(false)
-                                }
-                            )
+                        .pointerInput(controlsEnabled) {
+                            if (controlsEnabled) {
+                                detectTapGestures(
+                                    onPress = {
+                                        onHandbrakeChange(true)
+                                        tryAwaitRelease()
+                                        onHandbrakeChange(false)
+                                    }
+                                )
+                            }
                         }
                         .testTag("handbrake_button"),
                     contentAlignment = Alignment.Center
@@ -528,14 +557,16 @@ fun RaceHud(
                             .clip(RoundedCornerShape(12.dp))
                             .background(if (playerState.isBraking) ApexRed else DarkSurface.copy(alpha = 0.85f))
                             .border(1.5.dp, ApexRed, RoundedCornerShape(12.dp))
-                            .pointerInput(Unit) {
-                                detectTapGestures(
-                                    onPress = {
-                                        onBrakeChange(1.0f)
-                                        tryAwaitRelease()
-                                        onBrakeChange(0f)
-                                    }
-                                )
+                            .pointerInput(controlsEnabled) {
+                                if (controlsEnabled) {
+                                    detectTapGestures(
+                                        onPress = {
+                                            onBrakeChange(1.0f)
+                                            tryAwaitRelease()
+                                            onBrakeChange(0f)
+                                        }
+                                    )
+                                }
                             }
                             .testTag("brake_pedal"),
                         contentAlignment = Alignment.Center
@@ -553,14 +584,16 @@ fun RaceHud(
                             .height(84.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .background(Brush.verticalGradient(listOf(Color(0xFF00E676), Color(0xFF00A854))))
-                            .pointerInput(Unit) {
-                                detectTapGestures(
-                                    onPress = {
-                                        onThrottleChange(1.0f)
-                                        tryAwaitRelease()
-                                        onThrottleChange(0f)
-                                    }
-                                )
+                            .pointerInput(controlsEnabled) {
+                                if (controlsEnabled) {
+                                    detectTapGestures(
+                                        onPress = {
+                                            onThrottleChange(1.0f)
+                                            tryAwaitRelease()
+                                            onThrottleChange(0f)
+                                        }
+                                    )
+                                }
                             }
                             .testTag("gas_pedal"),
                         contentAlignment = Alignment.Center
@@ -574,7 +607,7 @@ fun RaceHud(
 }
 
 @Composable
-fun VirtualSteeringWheel(onSteerChange: (Float) -> Unit) {
+fun VirtualSteeringWheel(onSteerChange: (Float) -> Unit, enabled: Boolean = true) {
     var wheelAngle by remember { mutableFloatStateOf(0f) }
 
     Box(
@@ -583,22 +616,24 @@ fun VirtualSteeringWheel(onSteerChange: (Float) -> Unit) {
             .clip(CircleShape)
             .background(DarkSurface.copy(alpha = 0.85f))
             .border(2.dp, ApexCyan, CircleShape)
-            .pointerInput(Unit) {
-                detectDragGestures(
-                    onDragEnd = {
-                        wheelAngle = 0f
-                        onSteerChange(0f)
-                    },
-                    onDragCancel = {
-                        wheelAngle = 0f
-                        onSteerChange(0f)
-                    },
-                    onDrag = { change, dragAmount ->
-                        change.consume()
-                        wheelAngle = (wheelAngle + dragAmount.x * 0.8f).coerceIn(-90f, 90f)
-                        onSteerChange(wheelAngle / 90f)
-                    }
-                )
+            .pointerInput(enabled) {
+                if (enabled) {
+                    detectDragGestures(
+                        onDragEnd = {
+                            wheelAngle = 0f
+                            onSteerChange(0f)
+                        },
+                        onDragCancel = {
+                            wheelAngle = 0f
+                            onSteerChange(0f)
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            wheelAngle = (wheelAngle + dragAmount.x * 0.8f).coerceIn(-90f, 90f)
+                            onSteerChange(wheelAngle / 90f)
+                        }
+                    )
+                }
             },
         contentAlignment = Alignment.Center
     ) {

@@ -821,6 +821,270 @@ class ExampleRobolectricTest {
         val maxSpeed = dataRepository.getMaxSpeedRecorded()
         assertTrue("Max speed should be recorded", maxSpeed >= 295f)
     }
+
+    @Test
+    fun `test driver profile repository stats and username update`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val repository = com.example.data.DriverProfileRepository(context)
+
+        // Save initial profile
+        val profile = com.example.data.room.DriverProfile(
+            id = "driver_test_user",
+            username = "RacerX",
+            avatarPath = "avatar_cyber_neon",
+            totalDistance = 25000.0,
+            totalWins = 12,
+            country = "JP"
+        )
+        repository.saveDriverProfile(profile)
+
+        val retrieved = repository.getDriverProfile("driver_test_user")
+        assertNotNull(retrieved)
+        assertEquals("RacerX", retrieved!!.username)
+        assertEquals(25000.0, retrieved.totalDistance, 0.01)
+        assertEquals(12, retrieved.totalWins)
+
+        // Update username via repository
+        repository.updateUsername("ApexChampion99", "driver_test_user")
+        val updated = repository.getDriverProfile("driver_test_user")
+        assertNotNull(updated)
+        assertEquals("ApexChampion99", updated!!.username)
+        // Ensure other stats are preserved
+        assertEquals(25000.0, updated.totalDistance, 0.01)
+        assertEquals(12, updated.totalWins)
+    }
+
+    @Test
+    fun `test game statistics repository race history and outcomes retrieval`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val repo = com.example.data.GameStatisticsRepository(context)
+
+        val timestamp = System.currentTimeMillis()
+        val raceRecord = com.example.data.room.GameStatistics(
+            raceHistory = "Grand Prix Season Finale - 1st Place",
+            carPerformanceLevels = "Apex GT-86 Coupe Stage 3",
+            trackId = "monaco_riviera",
+            vehicleId = "apex_gt86",
+            position = 1,
+            totalRacers = 4,
+            bestLapTimeMs = 52300L,
+            isWin = true,
+            isPodium = true,
+            isClean = true,
+            maxSpeedKmh = 280f,
+            driftMeters = 300f,
+            distanceMeters = 5000f,
+            earningsCredits = 5000,
+            reputationEarned = 200,
+            timestamp = timestamp
+        )
+        val id = repo.insertGameStatistic(raceRecord)
+        assertTrue("Inserted record ID must be > 0", id > 0)
+
+        val all = repo.getRecentGameStatistics(10)
+        assertTrue("All game statistics must not be empty", all.isNotEmpty())
+        val found = all.find { it.recordId == id }
+        assertNotNull("Inserted record must be found in statistics list", found)
+        assertEquals(1, found!!.position)
+        assertTrue(found.isWin)
+        assertTrue(found.isClean)
+        assertEquals("monaco_riviera", found.trackId)
+        assertEquals(timestamp, found.timestamp)
+        assertEquals(52300L, found.bestLapTimeMs)
+    }
+
+    @Test
+    fun `test car performance progression tracking over time`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val repo = com.example.data.GameStatisticsRepository(context)
+
+        val t0 = System.currentTimeMillis() - 100000L
+        val t1 = System.currentTimeMillis()
+
+        // Baseline race
+        repo.insertGameStatistic(
+            com.example.data.room.GameStatistics(
+                trackId = "monaco_riviera",
+                vehicleId = "apex_gt86",
+                maxSpeedKmh = 220f,
+                bestLapTimeMs = 60000L,
+                driftMeters = 100f,
+                carPerformanceLevels = "Stage 1 Stock",
+                timestamp = t0
+            )
+        )
+
+        // Improved race
+        repo.insertGameStatistic(
+            com.example.data.room.GameStatistics(
+                trackId = "monaco_riviera",
+                vehicleId = "apex_gt86",
+                maxSpeedKmh = 275f,
+                bestLapTimeMs = 53000L,
+                driftMeters = 450f,
+                carPerformanceLevels = "Stage 3 Turbo & Aero",
+                timestamp = t1
+            )
+        )
+
+        val stats = repo.getRecentGameStatistics(10).sortedBy { it.timestamp }
+        assertTrue("Chronological stats must have at least 2 entries", stats.size >= 2)
+        val initial = stats.first()
+        val latest = stats.last()
+        assertTrue("Latest top speed must exceed or equal baseline", latest.maxSpeedKmh >= initial.maxSpeedKmh)
+    }
+
+    @Test
+    fun `test formatRaceDuration output with and without milliseconds`() {
+        val zeroMs = com.example.ui.components.formatRaceDuration(0L, includeMillis = true)
+        assertEquals("00:00.000", zeroMs)
+
+        val zeroNoMillis = com.example.ui.components.formatRaceDuration(0L, includeMillis = false)
+        assertEquals("00:00", zeroNoMillis)
+
+        // 1 minute, 5 seconds, 432 milliseconds = 65,432 ms
+        val formattedLap = com.example.ui.components.formatRaceDuration(65432L, includeMillis = true)
+        assertEquals("01:05.432", formattedLap)
+
+        val formattedNoMillis = com.example.ui.components.formatRaceDuration(65432L, includeMillis = false)
+        assertEquals("01:05", formattedNoMillis)
+
+        // 1 hour, 2 minutes, 3 seconds, 850 milliseconds = 3,723,850 ms
+        val formattedHour = com.example.ui.components.formatRaceDuration(3723850L, includeMillis = true)
+        assertEquals("01:02:03.850", formattedHour)
+    }
+
+    @Test
+    fun `test RaceTimerState start, stop, lap splits, and reset controls`() {
+        val timerState = com.example.ui.components.RaceTimerState(initialDurationMs = 0L, initialIsRunning = false)
+        assertFalse("Timer should start stopped", timerState.isRunning)
+        assertEquals(0L, timerState.elapsedMillis)
+        assertTrue("Lap list should initially be empty", timerState.lapTimes.isEmpty())
+
+        // Start timer
+        timerState.start()
+        assertTrue("Timer should be running", timerState.isRunning)
+
+        // Set time to 15,200 ms and record lap 1
+        timerState.setTime(15200L)
+        val lap1 = timerState.recordLap()
+        assertEquals(15200L, lap1)
+        assertEquals(1, timerState.lapTimes.size)
+
+        // Set time to 36,400 ms and record lap 2 (split should be 36400 - 15200 = 21200)
+        timerState.setTime(36400L)
+        val lap2 = timerState.recordLap()
+        assertEquals(21200L, lap2)
+        assertEquals(2, timerState.lapTimes.size)
+
+        // Toggle (should pause)
+        timerState.toggle()
+        assertFalse("Toggling running timer should pause it", timerState.isRunning)
+
+        // Reset
+        timerState.reset()
+        assertFalse("Reset timer should not be running", timerState.isRunning)
+        assertEquals(0L, timerState.elapsedMillis)
+        assertTrue("Lap times must be cleared on reset", timerState.lapTimes.isEmpty())
+        assertEquals("00:00.000", timerState.formattedTime)
+    }
+
+    @Test
+    fun `test MainViewModel race duration state and pause toggle`() {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val viewModel = com.example.ui.MainViewModel(app)
+
+        assertEquals(0L, viewModel.raceDurationMillis.value)
+        assertFalse("Race should not be paused by default", viewModel.isPaused.value)
+
+        viewModel.toggleRacePause()
+        assertTrue("Race should be paused after toggle", viewModel.isPaused.value)
+
+        viewModel.toggleRacePause()
+        assertFalse("Race should resume after second toggle", viewModel.isPaused.value)
+    }
+
+    @Test
+    fun `test RaceCountdownState 3-2-1 visual sequence progression`() {
+        var finishCalled = false
+        val state = com.example.ui.components.RaceCountdownState(
+            initialSeconds = 3,
+            autoStart = true,
+            onFinishedCallback = { finishCalled = true }
+        )
+
+        assertEquals(3, state.count)
+        assertEquals(com.example.ui.components.CountdownStage.THREE, state.stage)
+        assertTrue(state.isRunning)
+        assertFalse(state.isFinished)
+        assertFalse(finishCalled)
+
+        // Advance to 2
+        state.advance()
+        assertEquals(2, state.count)
+        assertEquals(com.example.ui.components.CountdownStage.TWO, state.stage)
+        assertFalse(state.isFinished)
+
+        // Advance to 1
+        state.advance()
+        assertEquals(1, state.count)
+        assertEquals(com.example.ui.components.CountdownStage.ONE, state.stage)
+        assertFalse(state.isFinished)
+
+        // Advance to GO (0)
+        state.advance()
+        assertEquals(0, state.count)
+        assertEquals(com.example.ui.components.CountdownStage.GO, state.stage)
+        assertFalse(state.isFinished)
+
+        // Advance past GO to FINISHED
+        state.advance()
+        assertEquals(com.example.ui.components.CountdownStage.FINISHED, state.stage)
+        assertTrue(state.isFinished)
+        assertFalse(state.isRunning)
+        assertTrue("onFinished callback must be invoked when countdown completes", finishCalled)
+    }
+
+    @Test
+    fun `test RaceCountdownState skip and restart controls`() {
+        var finishCalled = false
+        val state = com.example.ui.components.RaceCountdownState(
+            initialSeconds = 3,
+            autoStart = true,
+            onFinishedCallback = { finishCalled = true }
+        )
+
+        // Skip immediately
+        state.skip()
+        assertTrue(state.isFinished)
+        assertFalse(state.isRunning)
+        assertEquals(com.example.ui.components.CountdownStage.GO, state.stage)
+        assertTrue("Callback must be invoked on skip", finishCalled)
+
+        // Restart
+        finishCalled = false
+        state.restart()
+        assertEquals(3, state.count)
+        assertEquals(com.example.ui.components.CountdownStage.THREE, state.stage)
+        assertTrue(state.isRunning)
+        assertFalse(state.isFinished)
+        assertFalse(finishCalled)
+    }
+
+    @Test
+    fun `test MainViewModel race countdown state and completion unlocks timer`() {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val viewModel = com.example.ui.MainViewModel(app)
+
+        // Trigger countdown
+        viewModel.triggerRaceCountdown()
+        assertTrue("Race countdown should be active", viewModel.isCountdownActive.value)
+        assertEquals(0L, viewModel.raceDurationMillis.value)
+
+        // Complete countdown
+        viewModel.completeCountdown()
+        assertFalse("Race countdown should complete and allow gameplay", viewModel.isCountdownActive.value)
+    }
 }
 
 
