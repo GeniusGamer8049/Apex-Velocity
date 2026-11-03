@@ -6,6 +6,7 @@ import com.example.model.SurfacePatch
 import com.example.model.TireCompound
 import com.example.model.Track
 import com.example.model.Vehicle
+import com.example.model.WeatherManager
 import com.example.model.WeatherType
 import kotlin.math.PI
 import kotlin.math.abs
@@ -132,8 +133,11 @@ class PhysicsEngine {
             }
         }
 
+        // Dynamic Weather Handling Parameters
+        val weatherHandling = WeatherManager.getHandlingParameters(currentWeather)
+
         // Combined tire grip
-        val baseTireGrip = vehicle.effectiveGripMultiplier * weatherGrip * hazardGripFactor
+        val baseTireGrip = vehicle.effectiveGripMultiplier * weatherGrip * hazardGripFactor * weatherHandling.gripMultiplier
         state.effectiveTireGrip = baseTireGrip
 
         // 4. Boost / Nitrous System
@@ -189,14 +193,14 @@ class PhysicsEngine {
                 DriveTrain.RWD -> 1.0f
                 DriveTrain.FWD -> 0.90f
             }
-            drivingForce = (torque * currentRatio * finalDrive / wheelRadiusM) * throttleInput * drivetrainFactor
+            drivingForce = (torque * currentRatio * finalDrive / wheelRadiusM) * throttleInput * drivetrainFactor * weatherHandling.accelerationTractionMultiplier
         }
 
         var brakingForce = 0f
         state.isBraking = brakeInput > 0.05f
         if (state.isBraking) {
             val baseBrakeForce = (vehicle.effectiveWeightKg * 9.8f) * 1.35f * vehicle.effectiveBrakingPower
-            brakingForce = baseBrakeForce * brakeInput
+            brakingForce = baseBrakeForce * brakeInput * weatherHandling.brakingEfficiencyMultiplier
         }
 
         // Reverse gear handling
@@ -209,7 +213,7 @@ class PhysicsEngine {
         // Aerodynamic Drag & Downforce
         val aeroDownforceFactor = vehicle.effectiveDownforceFactor
         val downforceN = 0.5f * 1.225f * (0.8f + aeroDownforceFactor) * (speedMs * speedMs)
-        val dragForce = 0.5f * 1.225f * 0.34f * 2.1f * (vLong * abs(vLong))
+        val dragForce = 0.5f * 1.225f * 0.34f * 2.1f * (vLong * abs(vLong)) * weatherHandling.topSpeedDragMultiplier
 
         // Rolling resistance & off-track drag
         var rollingResistanceCoeff = 0.015f
@@ -228,7 +232,7 @@ class PhysicsEngine {
         state.slipAngleDeg = Math.toDegrees(slipAngleRad.toDouble()).toFloat()
 
         // Peak slip angle (~7 to 11 degrees)
-        val peakSlipDeg = 8.5f * (1f / baseTireGrip.coerceAtLeast(0.4f))
+        val peakSlipDeg = 8.5f * (1f / baseTireGrip.coerceAtLeast(0.4f)) * (1f / weatherHandling.steeringResponseMultiplier)
         val normalizedSlip = (abs(state.slipAngleDeg) / peakSlipDeg)
 
         // Lateral adhesion limit
@@ -253,7 +257,7 @@ class PhysicsEngine {
 
         // Tire Thermal Dynamics (FL, FR, RL, RR)
         val ambientTemp = if (trackWetness > 0.5f) 65f else 78f
-        val coolingRate = if (trackWetness > 0.3f) 4.0f else 1.2f
+        val coolingRate = if (trackWetness > 0.3f) weatherHandling.tireCoolingRate else 1.2f
         val frontBrakeHeating = if (state.isBraking) brakeInput * 24f else 0f
         val lateralHeatingFL = if (vLat < 0) abs(state.lateralG) * 16f else abs(state.lateralG) * 7f
         val lateralHeatingFR = if (vLat > 0) abs(state.lateralG) * 16f else abs(state.lateralG) * 7f
@@ -271,7 +275,7 @@ class PhysicsEngine {
         state.tireTempRR = state.tireTempRR.coerceIn(45f, 145f)
 
         // Drift state & score
-        val isSliding = abs(state.slipAngleDeg) > 12f && speedMs > 8f
+        val isSliding = abs(state.slipAngleDeg) > weatherHandling.lateralSlipThresholdDeg && speedMs > 6f
         state.isDrifting = isSliding
         if (state.isDrifting) {
             val driftAdd = (abs(state.slipAngleDeg) * (state.speedKmh / 50f) * dt * 8f).toInt()

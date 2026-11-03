@@ -27,6 +27,30 @@ interface GameStatisticsDao {
     @Query("SELECT * FROM game_statistics WHERE trackId = :trackId ORDER BY timestamp DESC")
     fun getStatisticsForTrack(trackId: String): Flow<List<GameStatistics>>
 
+    @Query("SELECT * FROM game_statistics WHERE bestLapTimeMs > 0 ORDER BY bestLapTimeMs ASC LIMIT :limit")
+    fun getTopRaceTimesFlow(limit: Int = 50): Flow<List<GameStatistics>>
+
+    @Query("SELECT * FROM game_statistics WHERE bestLapTimeMs > 0 ORDER BY bestLapTimeMs ASC LIMIT :limit")
+    suspend fun getTopRaceTimes(limit: Int = 50): List<GameStatistics>
+
+    @Query("SELECT * FROM game_statistics WHERE trackId = :trackId AND bestLapTimeMs > 0 ORDER BY bestLapTimeMs ASC LIMIT :limit")
+    fun getTopRaceTimesForTrackFlow(trackId: String, limit: Int = 50): Flow<List<GameStatistics>>
+
+    @Query("SELECT * FROM game_statistics WHERE trackId = :trackId AND bestLapTimeMs > 0 ORDER BY bestLapTimeMs ASC LIMIT :limit")
+    suspend fun getTopRaceTimesForTrack(trackId: String, limit: Int = 50): List<GameStatistics>
+
+    @Query("SELECT MIN(bestLapTimeMs) FROM game_statistics WHERE bestLapTimeMs > 0")
+    suspend fun getPersonalBestLapTime(): Long?
+
+    @Query("SELECT MIN(bestLapTimeMs) FROM game_statistics WHERE trackId = :trackId AND bestLapTimeMs > 0")
+    suspend fun getPersonalBestLapTimeForTrack(trackId: String): Long?
+
+    @Query("SELECT * FROM game_statistics WHERE bestLapTimeMs > 0 ORDER BY bestLapTimeMs ASC LIMIT 1")
+    suspend fun getPersonalBestRecord(): GameStatistics?
+
+    @Query("SELECT * FROM game_statistics WHERE trackId = :trackId AND bestLapTimeMs > 0 ORDER BY bestLapTimeMs ASC LIMIT 1")
+    suspend fun getPersonalBestRecordForTrack(trackId: String): GameStatistics?
+
     @Query("SELECT COUNT(*) FROM game_statistics")
     suspend fun getTotalRacesRecorded(): Int
 

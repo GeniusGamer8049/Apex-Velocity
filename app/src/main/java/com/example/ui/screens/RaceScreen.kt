@@ -11,9 +11,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.AppScreen
 import com.example.ui.MainViewModel
+import com.example.ui.SettingsViewModel
 import com.example.ui.components.RaceCountdown
+import com.example.ui.components.RacePauseMenu
+import com.example.ui.components.SettingsOverlay
 import com.example.ui.dialogs.PauseMenuDialog
 import com.example.ui.dialogs.RaceSummaryDialog
 import com.example.ui.game.GameCanvas
@@ -25,6 +29,9 @@ fun RaceScreen(
     viewModel: MainViewModel,
     onBackToMenu: () -> Unit
 ) {
+    val settingsViewModel: SettingsViewModel = viewModel()
+    val isSettingsVisible by settingsViewModel.isOverlayVisible.collectAsState()
+
     val profile by viewModel.profile.collectAsState()
     val playerState by viewModel.playerState.collectAsState()
     val aiRacers by viewModel.aiRacers.collectAsState()
@@ -42,7 +49,9 @@ fun RaceScreen(
     val currentPosition = viewModel.calculatePlayerPosition()
 
     BackHandler {
-        if (showTelemetryScreen) {
+        if (isSettingsVisible) {
+            settingsViewModel.hideOverlay()
+        } else if (showTelemetryScreen) {
             showTelemetryScreen = false
         } else if (!isPaused && raceResults == null) {
             viewModel.pauseRace()
@@ -100,7 +109,8 @@ fun RaceScreen(
             onSteerChange = { viewModel.steerInput = it },
             onHandbrakeChange = { viewModel.handbrakeInput = it },
             onBoostChange = { viewModel.boostInput = it },
-            onPauseClick = { viewModel.pauseRace() }
+            onPauseClick = { viewModel.pauseRace() },
+            onWeatherSelected = { viewModel.setWeatherCondition(it) }
         )
 
         // 3. Pre-Race 3-2-1 Countdown Sequence
@@ -112,32 +122,43 @@ fun RaceScreen(
             )
         }
 
-        // 3. Pause & Pit Stop Dialog
+        // 4. Race Pause Menu (surfaces on back button or pause UI toggle)
         if (isPaused && raceResults == null && !showTelemetryScreen) {
-            PauseMenuDialog(
+            RacePauseMenu(
+                onResume = { viewModel.resumeRace() },
+                onRestartRace = { viewModel.restartRace() },
+                onQuitToMainMenu = {
+                    viewModel.stopRace()
+                    onBackToMenu()
+                },
                 currentCompound = currentVehicle.upgrades.tireCompound,
                 trackWetness = weatherState.trackWetness,
                 isMuted = profile.isAudioMuted,
                 controlScheme = profile.controlScheme,
-                onResume = { viewModel.resumeRace() },
                 onPitStopTireSwap = { viewModel.pitStopTireSwap(it) },
                 onToggleAudio = { viewModel.toggleAudio() },
                 onToggleControls = { viewModel.toggleControlScheme() },
                 onOpenTelemetry = { showTelemetryScreen = true },
-                onRestart = { viewModel.restartRace() },
-                onExit = {
-                    viewModel.stopRace()
-                    onBackToMenu()
-                }
+                onOpenAudioSettings = { settingsViewModel.showOverlay() },
+                trackName = viewModel.activeTrack.name,
+                raceDurationMs = raceDurationMs
             )
         }
 
-        // 4. Live Telemetry & Performance Screen Overlay
+        // Live Telemetry & Performance Screen Overlay
         if (showTelemetryScreen) {
             TelemetryScreen(
                 vehicle = currentVehicle,
                 telemetryHistory = telemetryHistory,
                 onBack = { showTelemetryScreen = false }
+            )
+        }
+
+        // Audio & Sound Effects Settings Overlay
+        if (isSettingsVisible) {
+            SettingsOverlay(
+                viewModel = settingsViewModel,
+                onDismiss = { settingsViewModel.hideOverlay() }
             )
         }
 

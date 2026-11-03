@@ -20,6 +20,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import kotlinx.coroutines.flow.first
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -1085,6 +1086,330 @@ class ExampleRobolectricTest {
         viewModel.completeCountdown()
         assertFalse("Race countdown should complete and allow gameplay", viewModel.isCountdownActive.value)
     }
+
+    @Test
+    fun `test RacePauseMenu action callbacks and pause lifecycle`() {
+        var resumeClicked = false
+        var restartClicked = false
+        var quitClicked = false
+
+        val onResume = { resumeClicked = true }
+        val onRestart = { restartClicked = true }
+        val onQuit = { quitClicked = true }
+
+        onResume()
+        assertTrue("Resume callback should trigger", resumeClicked)
+
+        onRestart()
+        assertTrue("Restart callback should trigger", restartClicked)
+
+        onQuit()
+        assertTrue("Quit callback should trigger", quitClicked)
+
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val viewModel = com.example.ui.MainViewModel(app)
+
+        assertFalse("Initially not paused", viewModel.isPaused.value)
+        viewModel.pauseRace()
+        assertTrue("Paused after pauseRace()", viewModel.isPaused.value)
+        viewModel.resumeRace()
+        assertFalse("Resumed after resumeRace()", viewModel.isPaused.value)
+    }
+
+    @Test
+    fun `test WeatherManager handling parameters impact across clear, rain, and snow`() {
+        val clear = com.example.model.WeatherManager.getHandlingParameters(com.example.model.WeatherCondition.CLEAR)
+        val rain = com.example.model.WeatherManager.getHandlingParameters(com.example.model.WeatherCondition.RAIN)
+        val snow = com.example.model.WeatherManager.getHandlingParameters(com.example.model.WeatherCondition.SNOW)
+
+        // Verify Grip scaling
+        assertEquals(1.0f, clear.gripMultiplier, 0.01f)
+        assertEquals(0.72f, rain.gripMultiplier, 0.01f)
+        assertEquals(0.40f, snow.gripMultiplier, 0.01f)
+        assertTrue("Clear grip must exceed rain grip", clear.gripMultiplier > rain.gripMultiplier)
+        assertTrue("Rain grip must exceed snow grip", rain.gripMultiplier > snow.gripMultiplier)
+
+        // Verify Braking Efficiency scaling
+        assertEquals(1.0f, clear.brakingEfficiencyMultiplier, 0.01f)
+        assertEquals(0.75f, rain.brakingEfficiencyMultiplier, 0.01f)
+        assertEquals(0.44f, snow.brakingEfficiencyMultiplier, 0.01f)
+        assertTrue("Clear braking must exceed rain braking", clear.brakingEfficiencyMultiplier > rain.brakingEfficiencyMultiplier)
+        assertTrue("Rain braking must exceed snow braking", rain.brakingEfficiencyMultiplier > snow.brakingEfficiencyMultiplier)
+
+        // Verify Traction (Wheelspin prevention) scaling
+        assertEquals(1.0f, clear.accelerationTractionMultiplier, 0.01f)
+        assertEquals(0.70f, rain.accelerationTractionMultiplier, 0.01f)
+        assertEquals(0.38f, snow.accelerationTractionMultiplier, 0.01f)
+        assertTrue("Clear traction must exceed rain traction", clear.accelerationTractionMultiplier > rain.accelerationTractionMultiplier)
+        assertTrue("Rain traction must exceed snow traction", rain.accelerationTractionMultiplier > snow.accelerationTractionMultiplier)
+
+        // Verify Steering Response and Lateral Slip Threshold
+        assertTrue("Snow should provoke drift at lower slip angles", snow.lateralSlipThresholdDeg < clear.lateralSlipThresholdDeg)
+    }
+
+    @Test
+    fun `test WeatherManager condition cycling and effective calculations`() {
+        com.example.model.WeatherManager.setCondition(com.example.model.WeatherCondition.CLEAR)
+        assertEquals(com.example.model.WeatherCondition.CLEAR, com.example.model.WeatherManager.currentCondition.value)
+
+        // Cycle to Rain
+        val cycledToRain = com.example.model.WeatherManager.cycleNextCondition()
+        assertEquals(com.example.model.WeatherCondition.RAIN, cycledToRain)
+
+        // Cycle to Snow
+        val cycledToSnow = com.example.model.WeatherManager.cycleNextCondition()
+        assertEquals(com.example.model.WeatherCondition.SNOW, cycledToSnow)
+
+        // Cycle back to Clear
+        val cycledToClear = com.example.model.WeatherManager.cycleNextCondition()
+        assertEquals(com.example.model.WeatherCondition.CLEAR, cycledToClear)
+
+        // Test helper calculation methods
+        val baseGrip = 1.15f
+        val effectiveSnowGrip = com.example.model.WeatherManager.calculateEffectiveGrip(baseGrip, com.example.model.WeatherCondition.SNOW)
+        assertEquals(baseGrip * 0.40f, effectiveSnowGrip, 0.01f)
+
+        val baseBrake = 1000f
+        val effectiveRainBrake = com.example.model.WeatherManager.calculateEffectiveBraking(baseBrake, com.example.model.WeatherCondition.RAIN)
+        assertEquals(baseBrake * 0.75f, effectiveRainBrake, 0.01f)
+    }
+
+    @Test
+    fun `test MainViewModel live weather condition toggle`() {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val viewModel = com.example.ui.MainViewModel(app)
+
+        // Toggle to Rain
+        viewModel.setWeatherCondition(com.example.model.WeatherCondition.RAIN)
+        assertEquals(com.example.model.WeatherType.LIGHT_RAIN, viewModel.weatherState.value.currentWeather)
+        assertEquals(0.75f, viewModel.weatherState.value.trackWetness, 0.01f)
+        assertEquals(com.example.model.WeatherCondition.RAIN, com.example.model.WeatherManager.currentCondition.value)
+
+        // Toggle to Snow
+        viewModel.setWeatherCondition(com.example.model.WeatherCondition.SNOW)
+        assertEquals(com.example.model.WeatherType.FREEZING_ICE, viewModel.weatherState.value.currentWeather)
+        assertEquals(0.90f, viewModel.weatherState.value.trackWetness, 0.01f)
+        assertEquals(com.example.model.WeatherCondition.SNOW, com.example.model.WeatherManager.currentCondition.value)
+
+        // Toggle back to Clear
+        viewModel.setWeatherCondition(com.example.model.WeatherCondition.CLEAR)
+        assertEquals(com.example.model.WeatherType.SUNNY_CLEAR, viewModel.weatherState.value.currentWeather)
+        assertEquals(0.0f, viewModel.weatherState.value.trackWetness, 0.01f)
+        assertEquals(com.example.model.WeatherCondition.CLEAR, com.example.model.WeatherManager.currentCondition.value)
+    }
+
+    @Test
+    fun `test Leaderboard Room queries for top race times and personal best identification`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val repo = com.example.data.GameStatisticsRepository(context)
+
+        // Clear existing statistics
+        repo.clearAllStatistics()
+
+        // Insert multiple race times on "monaco_riviera"
+        repo.insertGameStatistic(
+            com.example.data.room.GameStatistics(
+                trackId = "monaco_riviera",
+                vehicleId = "apex_gt86",
+                bestLapTimeMs = 74500L,
+                maxSpeedKmh = 230f,
+                position = 2,
+                timestamp = System.currentTimeMillis() - 300000L
+            )
+        )
+
+        repo.insertGameStatistic(
+            com.example.data.room.GameStatistics(
+                trackId = "monaco_riviera",
+                vehicleId = "apex_gt86",
+                bestLapTimeMs = 62100L, // Personal Best
+                maxSpeedKmh = 255f,
+                position = 1,
+                isWin = true,
+                timestamp = System.currentTimeMillis() - 200000L
+            )
+        )
+
+        repo.insertGameStatistic(
+            com.example.data.room.GameStatistics(
+                trackId = "monaco_riviera",
+                vehicleId = "apex_gt86",
+                bestLapTimeMs = 68900L,
+                maxSpeedKmh = 242f,
+                position = 1,
+                timestamp = System.currentTimeMillis() - 100000L
+            )
+        )
+
+        // Insert race time on another track "tokyo_expressway"
+        repo.insertGameStatistic(
+            com.example.data.room.GameStatistics(
+                trackId = "tokyo_expressway",
+                vehicleId = "hyper_valkyrie",
+                bestLapTimeMs = 58200L, // Overall fastest
+                maxSpeedKmh = 310f,
+                position = 1,
+                timestamp = System.currentTimeMillis()
+            )
+        )
+
+        // Fetch top race times overall
+        val topTimes = repo.getTopRaceTimes(10)
+        assertEquals(4, topTimes.size)
+
+        // Verify ordering: fastest (lowest ms) first
+        assertEquals(58200L, topTimes[0].bestLapTimeMs)
+        assertEquals(62100L, topTimes[1].bestLapTimeMs)
+        assertEquals(68900L, topTimes[2].bestLapTimeMs)
+        assertEquals(74500L, topTimes[3].bestLapTimeMs)
+
+        // Verify Personal Best overall
+        val overallPb = repo.getPersonalBestLapTime()
+        assertEquals(58200L, overallPb)
+
+        // Verify Personal Best on Monaco specifically
+        val monacoPb = repo.getPersonalBestLapTime("monaco_riviera")
+        assertEquals(62100L, monacoPb)
+
+        val monacoTopTimes = repo.getTopRaceTimesForTrack("monaco_riviera", 10)
+        assertEquals(3, monacoTopTimes.size)
+        assertEquals(62100L, monacoTopTimes[0].bestLapTimeMs)
+
+        // Verify personal best record entity retrieval
+        val pbRecord = repo.getPersonalBestRecord("monaco_riviera")
+        assertNotNull(pbRecord)
+        assertEquals(62100L, pbRecord?.bestLapTimeMs)
+        assertEquals("monaco_riviera", pbRecord?.trackId)
+        assertTrue(pbRecord?.isWin == true)
+    }
+
+    @Test
+    fun `test settings datastore default preferences and updates`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dataStore = com.example.data.SettingsDataStore.getInstance(context)
+
+        // Reset to clean default baseline
+        dataStore.resetToDefaults()
+
+        val initial = dataStore.audioSettingsFlow.first()
+        assertEquals(1.0f, initial.masterVolume, 0.001f)
+        assertFalse(initial.isMasterMuted)
+        assertTrue(initial.soundEffectsEnabled)
+        assertEquals(1.0f, initial.soundEffectsVolume, 0.001f)
+        assertTrue(initial.engineSoundEnabled)
+
+        // Test master volume adjustment & clamping
+        dataStore.setMasterVolume(0.65f)
+        var updated = dataStore.audioSettingsFlow.first()
+        assertEquals(0.65f, updated.masterVolume, 0.001f)
+
+        // Test over-range clamping
+        dataStore.setMasterVolume(1.5f)
+        updated = dataStore.audioSettingsFlow.first()
+        assertEquals(1.0f, updated.masterVolume, 0.001f)
+
+        dataStore.setMasterVolume(-0.5f)
+        updated = dataStore.audioSettingsFlow.first()
+        assertEquals(0.0f, updated.masterVolume, 0.001f)
+
+        // Test mute toggling
+        dataStore.setMasterMuted(true)
+        updated = dataStore.audioSettingsFlow.first()
+        assertTrue(updated.isMasterMuted)
+
+        dataStore.toggleMasterMuted()
+        updated = dataStore.audioSettingsFlow.first()
+        assertFalse(updated.isMasterMuted)
+
+        // Test sound effects toggle & volume
+        dataStore.setSoundEffectsEnabled(false)
+        updated = dataStore.audioSettingsFlow.first()
+        assertFalse(updated.soundEffectsEnabled)
+
+        dataStore.toggleSoundEffects()
+        updated = dataStore.audioSettingsFlow.first()
+        assertTrue(updated.soundEffectsEnabled)
+
+        dataStore.setSoundEffectsVolume(0.42f)
+        updated = dataStore.audioSettingsFlow.first()
+        assertEquals(0.42f, updated.soundEffectsVolume, 0.001f)
+
+        // Test reset to defaults
+        dataStore.resetToDefaults()
+        val resetSettings = dataStore.audioSettingsFlow.first()
+        assertEquals(1.0f, resetSettings.masterVolume, 0.001f)
+        assertFalse(resetSettings.isMasterMuted)
+        assertTrue(resetSettings.soundEffectsEnabled)
+        assertEquals(1.0f, resetSettings.soundEffectsVolume, 0.001f)
+        assertTrue(resetSettings.engineSoundEnabled)
+    }
+
+    @Test
+    fun `test settings viewmodel audio synchronization and overlay states`() {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val dataStore = com.example.data.SettingsDataStore.getInstance(app)
+        val viewModel = com.example.ui.SettingsViewModel(app, dataStore)
+
+        // Verify initial overlay visibility
+        assertFalse("Overlay initially hidden", viewModel.isOverlayVisible.value)
+        viewModel.showOverlay()
+        assertTrue("Overlay shown", viewModel.isOverlayVisible.value)
+        viewModel.hideOverlay()
+        assertFalse("Overlay hidden", viewModel.isOverlayVisible.value)
+        viewModel.toggleOverlay()
+        assertTrue("Overlay toggled visible", viewModel.isOverlayVisible.value)
+        viewModel.toggleOverlay()
+        assertFalse("Overlay toggled hidden", viewModel.isOverlayVisible.value)
+
+        // Test audio function executes safely without crashing
+        viewModel.testAudio()
+    }
+
+    @Test
+    fun `test settings overlay callbacks and user interactions`() {
+        var masterMuteToggled = false
+        var masterVolumeChanged = 0f
+        var sfxToggled = false
+        var sfxVolumeChanged = 0f
+        var engineToggled = false
+        var testAudioTriggered = false
+        var resetDefaultsTriggered = false
+        var dismissed = false
+
+        val onMasterMuteToggle = { masterMuteToggled = true }
+        val onMasterVolumeChange = { v: Float -> masterVolumeChanged = v }
+        val onSoundEffectsToggle = { sfxToggled = true }
+        val onSoundEffectsVolumeChange = { v: Float -> sfxVolumeChanged = v }
+        val onEngineSoundToggle = { engineToggled = true }
+        val onTestAudio = { testAudioTriggered = true }
+        val onResetDefaults = { resetDefaultsTriggered = true }
+        val onDismiss = { dismissed = true }
+
+        onMasterMuteToggle()
+        assertTrue(masterMuteToggled)
+
+        onMasterVolumeChange(0.5f)
+        assertEquals(0.5f, masterVolumeChanged, 0.001f)
+
+        onSoundEffectsToggle()
+        assertTrue(sfxToggled)
+
+        onSoundEffectsVolumeChange(0.35f)
+        assertEquals(0.35f, sfxVolumeChanged, 0.001f)
+
+        onEngineSoundToggle()
+        assertTrue(engineToggled)
+
+        onTestAudio()
+        assertTrue(testAudioTriggered)
+
+        onResetDefaults()
+        assertTrue(resetDefaultsTriggered)
+
+        onDismiss()
+        assertTrue(dismissed)
+    }
 }
+
 
 

@@ -88,10 +88,13 @@ import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextWhite
 import kotlinx.coroutines.launch
 
+import com.example.ui.components.Leaderboard
+
 enum class LeaderboardFilter(val title: String) {
     GLOBAL("All Drivers"),
     MY_CLASS("My Car Class"),
-    RIVALS("Rival Group")
+    RIVALS("Rival Group"),
+    ROOM_DB("Top Room Records")
 }
 
 @Composable
@@ -133,6 +136,7 @@ fun LeaderboardScreen(
                     entries.take(8)
                 }
             }
+            LeaderboardFilter.ROOM_DB -> entries
         }
     }
 
@@ -370,46 +374,59 @@ fun LeaderboardScreen(
             }
         }
 
-        // 5. Top 3 Podium (Only in Global view and when at least 3 entries exist)
-        if (activeFilter == LeaderboardFilter.GLOBAL && filteredEntries.size >= 3) {
+        if (activeFilter == LeaderboardFilter.ROOM_DB) {
             item {
-                PodiumSection(
-                    first = filteredEntries[0],
-                    second = filteredEntries[1],
-                    third = filteredEntries[2]
+                Leaderboard(
+                    initialTrackId = selectedTrackId,
+                    onSelectTrack = onSelectTrack,
+                    onStartRaceClick = { onStartTimeTrial(currentTrack) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(650.dp)
                 )
             }
-        }
-
-        // 6. Section Header
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "STANDINGS (${filteredEntries.size} DRIVERS)",
-                    color = TextMuted,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp
-                )
-                Text(
-                    text = "TIME / GAP",
-                    color = TextMuted,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp
-                )
+        } else {
+            // 5. Top 3 Podium (Only in Global view and when at least 3 entries exist)
+            if (activeFilter == LeaderboardFilter.GLOBAL && filteredEntries.size >= 3) {
+                item {
+                    PodiumSection(
+                        first = filteredEntries[0],
+                        second = filteredEntries[1],
+                        third = filteredEntries[2]
+                    )
+                }
             }
-        }
 
-        // 7. Rankings List
-        items(filteredEntries, key = { it.id }) { entry ->
-            LeaderboardRow(entry = entry)
+            // 6. Section Header
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "STANDINGS (${filteredEntries.size} DRIVERS)",
+                        color = TextMuted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = "TIME / GAP",
+                        color = TextMuted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                }
+            }
+
+            // 7. Rankings List
+            items(filteredEntries, key = { it.id }) { entry ->
+                LeaderboardRow(entry = entry)
+            }
         }
 
         item {

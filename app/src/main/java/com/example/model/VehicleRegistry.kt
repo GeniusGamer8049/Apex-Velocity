@@ -101,4 +101,8 @@ object VehicleRegistry {
             )
         )
     }
+
+    fun getVehicleById(id: String): Vehicle {
+        return createDefaultVehicles().find { it.id == id } ?: createDefaultVehicles().first()
+    }
 }

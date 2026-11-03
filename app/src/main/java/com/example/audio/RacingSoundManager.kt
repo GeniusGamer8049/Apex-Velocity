@@ -369,4 +369,16 @@ class RacingSoundManager {
     fun release() {
         stop()
     }
+
+    companion object {
+        @Volatile
+        private var INSTANCE: RacingSoundManager? = null
+
+        fun getInstance(context: android.content.Context? = null): RacingSoundManager {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: RacingSoundManager().also { INSTANCE = it }
+            }
+        }
+    }
 }
+

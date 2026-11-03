@@ -42,6 +42,44 @@ class GameStatisticsRepository(
         return gameStatisticsDao.getStatisticsForTrack(trackId)
     }
 
+    /**
+     * Continuous reactive Flow emitting top race times ordered by fastest best lap time.
+     */
+    val topRaceTimesFlow: Flow<List<GameStatistics>> =
+        gameStatisticsDao.getTopRaceTimesFlow(50)
+
+    fun getTopRaceTimesFlow(limit: Int = 50): Flow<List<GameStatistics>> {
+        return gameStatisticsDao.getTopRaceTimesFlow(limit)
+    }
+
+    fun getTopRaceTimesForTrackFlow(trackId: String, limit: Int = 50): Flow<List<GameStatistics>> {
+        return gameStatisticsDao.getTopRaceTimesForTrackFlow(trackId, limit)
+    }
+
+    suspend fun getTopRaceTimes(limit: Int = 50): List<GameStatistics> = withContext(ioDispatcher) {
+        gameStatisticsDao.getTopRaceTimes(limit)
+    }
+
+    suspend fun getTopRaceTimesForTrack(trackId: String, limit: Int = 50): List<GameStatistics> = withContext(ioDispatcher) {
+        gameStatisticsDao.getTopRaceTimesForTrack(trackId, limit)
+    }
+
+    suspend fun getPersonalBestLapTime(trackId: String? = null): Long? = withContext(ioDispatcher) {
+        if (trackId != null && trackId.isNotBlank()) {
+            gameStatisticsDao.getPersonalBestLapTimeForTrack(trackId)
+        } else {
+            gameStatisticsDao.getPersonalBestLapTime()
+        }
+    }
+
+    suspend fun getPersonalBestRecord(trackId: String? = null): GameStatistics? = withContext(ioDispatcher) {
+        if (trackId != null && trackId.isNotBlank()) {
+            gameStatisticsDao.getPersonalBestRecordForTrack(trackId)
+        } else {
+            gameStatisticsDao.getPersonalBestRecord()
+        }
+    }
+
     suspend fun getRecentGameStatistics(limit: Int = 20): List<GameStatistics> = withContext(ioDispatcher) {
         gameStatisticsDao.getRecentGameStatistics(limit)
     }

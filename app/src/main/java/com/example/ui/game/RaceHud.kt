@@ -61,8 +61,11 @@ import com.example.ui.theme.ApexGreen
 import com.example.ui.theme.ApexOrange
 import com.example.ui.theme.ApexRed
 import com.example.model.TireCompound
+import com.example.model.WeatherCondition
+import com.example.model.WeatherManager
 import com.example.ui.components.DynamicWeatherOverlay
 import com.example.ui.components.RaceTimerHud
+import com.example.ui.components.WeatherControlOverlay
 import com.example.ui.theme.CarbonBlack
 import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.SurfaceBorder
@@ -93,7 +96,8 @@ fun RaceHud(
     raceDurationMs: Long = 0L,
     isRaceRunning: Boolean = true,
     controlsEnabled: Boolean = true,
-    onToggleRaceTimer: () -> Unit = onPauseClick
+    onToggleRaceTimer: () -> Unit = onPauseClick,
+    onWeatherSelected: (WeatherCondition) -> Unit = {}
 ) {
     var showTelemetry by remember { mutableStateOf(false) }
 
@@ -291,6 +295,13 @@ fun RaceHud(
                 weatherState = weatherState,
                 playerState = playerState,
                 tireCompound = tireCompound
+            )
+
+            // Weather Manager Live Control Overlay (Toggle Clear, Rain, Snow)
+            WeatherControlOverlay(
+                activeCondition = WeatherCondition.fromWeatherType(weatherState.currentWeather),
+                onWeatherSelected = onWeatherSelected,
+                modifier = Modifier.fillMaxWidth()
             )
         }
 

@@ -68,6 +68,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val dbDriverProfile: Flow<DriverProfile?> = driverProfileRepository.driverProfileFlow
     val recentGameStatistics: Flow<List<GameStatistics>> = gameStatisticsRepository.recentGameStatisticsFlow
     val allGameStatistics: Flow<List<GameStatistics>> = gameStatisticsRepository.allGameStatisticsFlow
+    val topRaceTimes: Flow<List<GameStatistics>> = gameStatisticsRepository.topRaceTimesFlow
+
+    fun getTopRaceTimesForTrack(trackId: String): Flow<List<GameStatistics>> =
+        gameStatisticsRepository.getTopRaceTimesForTrackFlow(trackId)
 
     private val _currentScreen = MutableStateFlow(AppScreen.GARAGE)
     val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
@@ -76,7 +80,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val physicsEngine = PhysicsEngine()
     private val aiOpponentManager = AiOpponentManager()
     val particleSystem = ParticleSystem()
-    val soundManager = RacingSoundManager()
+    val soundManager = RacingSoundManager.getInstance(application)
     val proceduralAudio = ProceduralAudio()
 
     // Active Race State
@@ -239,6 +243,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         // Initialize Dynamic Weather
+        val initialCondition = com.example.model.WeatherCondition.fromWeatherType(initialWeather)
+        com.example.model.WeatherManager.setCondition(initialCondition)
+
         weatherState.value = DynamicWeatherState(
             currentWeather = initialWeather,
             trackWetness = if (initialWeather == WeatherType.SUNNY_CLEAR) 0f else if (initialWeather == WeatherType.LIGHT_RAIN) 0.5f else 0.85f,
@@ -825,6 +832,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun pitStopTireSwap(compound: TireCompound) {
         val v = getCurrentVehicle()
         repository.equipTireCompound(v.id, compound)
+    }
+
+    fun setWeatherCondition(condition: com.example.model.WeatherCondition) {
+        com.example.model.WeatherManager.setCondition(condition)
+        val targetWetness = condition.targetTrackWetness
+        weatherState.value = weatherState.value.copy(
+            currentWeather = condition.associatedWeatherType,
+            trackWetness = targetWetness,
+            alertMessage = "CONDITIONS: ${condition.displayName.uppercase()}"
+        )
+    }
+
+    fun cycleWeatherCondition(): com.example.model.WeatherCondition {
+        val next = com.example.model.WeatherManager.cycleNextCondition()
+        setWeatherCondition(next)
+        return next
     }
 
     fun restartRace() {

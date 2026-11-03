@@ -480,6 +480,20 @@ private fun DrawScope.drawWeatherOverlay(
             size = Size(w, h)
         )
     }
+
+    // Snow flakes & frost layer
+    if (weather == WeatherType.FREEZING_ICE) {
+        val count = 50
+        for (i in 0 until count) {
+            val sx = (i * 43f + (System.currentTimeMillis() % 2400) * 0.7f) % w
+            val sy = (i * 59f + (System.currentTimeMillis() % 1800) * 1.2f) % h
+            drawCircle(
+                color = Color.White.copy(alpha = 0.85f),
+                radius = 2.2f + (i % 3) * 1.1f,
+                center = Offset(sx, sy)
+            )
+        }
+    }
 }
 
 private fun DrawScope.drawMiniMap(
