@@ -64,14 +64,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val dataRepository: DataRepository = repository.dataRepository
     val driverProfileRepository: com.example.data.DriverProfileRepository = repository.driverProfileRepository
     val gameStatisticsRepository: com.example.data.GameStatisticsRepository = repository.gameStatisticsRepository
+    val achievementsRepository: com.example.data.AchievementsRepository = repository.achievementsRepository
+    val dailyChallengesRepository: com.example.data.DailyChallengesRepository = repository.dailyChallengesRepository
     val profile: StateFlow<PlayerProfile> = repository.profile
     val dbDriverProfile: Flow<DriverProfile?> = driverProfileRepository.driverProfileFlow
     val recentGameStatistics: Flow<List<GameStatistics>> = gameStatisticsRepository.recentGameStatisticsFlow
     val allGameStatistics: Flow<List<GameStatistics>> = gameStatisticsRepository.allGameStatisticsFlow
     val topRaceTimes: Flow<List<GameStatistics>> = gameStatisticsRepository.topRaceTimesFlow
+    val roomAchievements: Flow<List<com.example.data.room.Achievements>> = achievementsRepository.allAchievementsFlow
+    val roomDailyChallenges: Flow<List<com.example.data.room.DailyChallenges>> = dailyChallengesRepository.todayChallengesFlow
+    val activeDailyChallenges: Flow<List<com.example.data.room.DailyChallenges>> = dailyChallengesRepository.activeChallengesFlow
 
     fun getTopRaceTimesForTrack(trackId: String): Flow<List<GameStatistics>> =
         gameStatisticsRepository.getTopRaceTimesForTrackFlow(trackId)
+
+    fun claimRoomDailyChallenge(challengeId: String) = repository.claimRoomDailyChallenge(challengeId)
 
     private val _currentScreen = MutableStateFlow(AppScreen.GARAGE)
     val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()

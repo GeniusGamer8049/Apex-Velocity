@@ -8,15 +8,21 @@ import androidx.room.RoomDatabase
 @Database(
     entities = [
         DriverProfile::class,
-        GameStatistics::class
+        GameStatistics::class,
+        Achievements::class,
+        DailyChallenges::class
     ],
-    version = 1,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun driverProfileDao(): DriverProfileDao
     abstract fun gameStatisticsDao(): GameStatisticsDao
+    abstract fun achievementsDao(): AchievementsDao
+    fun achievementDao(): AchievementsDao = achievementsDao()
+    abstract fun dailyChallengesDao(): DailyChallengesDao
+    fun dailyChallengeDao(): DailyChallengesDao = dailyChallengesDao()
 
     companion object {
         @Volatile

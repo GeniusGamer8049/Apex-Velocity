@@ -78,6 +78,7 @@ class MainActivity : ComponentActivity() {
 fun RacingApp(viewModel: MainViewModel) {
     val currentScreen by viewModel.currentScreen.collectAsState()
     val profile by viewModel.profile.collectAsState()
+    val roomDailyChallenges by viewModel.roomDailyChallenges.collectAsState(initial = emptyList())
     val latestUnlockedBadges by viewModel.latestUnlockedBadges.collectAsState()
     var showAchievementsDialog by remember { mutableStateOf(false) }
     var showDriverProfileDialog by remember { mutableStateOf(false) }
@@ -209,6 +210,7 @@ fun RacingApp(viewModel: MainViewModel) {
                             AppScreen.GARAGE -> {
                                 GarageScreen(
                                     profile = profile,
+                                    dailyChallenges = roomDailyChallenges,
                                     onSelectVehicle = { viewModel.selectVehicle(it) },
                                     onPurchaseVehicle = { viewModel.purchaseVehicle(it) },
                                     onUpgradeVehicle = { vid, cat -> viewModel.upgradeVehicle(vid, cat) },
@@ -216,7 +218,7 @@ fun RacingApp(viewModel: MainViewModel) {
                                     onUpdateCustomization = { vid, color, underglow ->
                                         viewModel.updateVehicleCustomization(vid, color, underglow)
                                     },
-                                    onClaimChallenge = { viewModel.claimChallenge(it) },
+                                    onClaimChallenge = { viewModel.claimRoomDailyChallenge(it) },
                                     onClaimAllBonus = { viewModel.claimAllDailyBonus() },
                                     onOpenAchievements = { showAchievementsDialog = true },
                                     onOpenDriverProfile = { viewModel.navigateTo(AppScreen.DRIVER_PROFILE) }

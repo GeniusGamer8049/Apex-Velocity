@@ -1,11 +1,15 @@
 package com.example.data
 
 import android.content.Context
+import com.example.data.room.Achievements
+import com.example.data.room.AchievementsDao
 import com.example.data.room.AppDatabase
 import com.example.data.room.DriverProfile
 import com.example.data.room.DriverProfileDao
 import com.example.data.room.GameStatistics
 import com.example.data.room.GameStatisticsDao
+import com.example.data.room.DailyChallenges
+import com.example.data.room.DailyChallengesDao
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -14,21 +18,27 @@ import kotlinx.coroutines.withContext
 /**
  * Data Repository class that abstracts Room database operations from the UI layer,
  * providing a clean, thread-safe, reactive API for accessing and persisting
- * [DriverProfile] and [GameStatistics] data.
+ * [DriverProfile], [GameStatistics], [Achievements], and [DailyChallenges] data.
  */
 class DataRepository(
     val driverProfileDao: DriverProfileDao,
     val gameStatisticsDao: GameStatisticsDao,
+    val achievementsDao: AchievementsDao? = null,
+    val dailyChallengesDao: DailyChallengesDao? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) {
 
     constructor(context: Context) : this(
         driverProfileDao = AppDatabase.getDatabase(context).driverProfileDao(),
-        gameStatisticsDao = AppDatabase.getDatabase(context).gameStatisticsDao()
+        gameStatisticsDao = AppDatabase.getDatabase(context).gameStatisticsDao(),
+        achievementsDao = AppDatabase.getDatabase(context).achievementsDao(),
+        dailyChallengesDao = AppDatabase.getDatabase(context).dailyChallengesDao()
     )
 
     val driverProfileRepository = DriverProfileRepository(driverProfileDao, ioDispatcher)
     val gameStatisticsRepository = GameStatisticsRepository(gameStatisticsDao, ioDispatcher)
+    val achievementsRepository = achievementsDao?.let { AchievementsRepository(it, ioDispatcher) }
+    val dailyChallengesRepository = dailyChallengesDao?.let { DailyChallengesRepository(it, ioDispatcher) }
 
     // ========================================================================
     // Driver Profile APIs
@@ -101,6 +111,33 @@ class DataRepository(
             id = id,
             badgeId = badgeId
         )
+    }
+
+    /**
+     * Updates player racing statistics: total races completed, podium finishes, and preferred car.
+     */
+    suspend fun updatePlayerStatistics(
+        racesCompleted: Int,
+        podiumFinishes: Int,
+        preferredCar: String,
+        id: String = "primary_driver"
+    ) = withContext(ioDispatcher) {
+        driverProfileRepository.updatePlayerStatistics(
+            racesCompleted = racesCompleted,
+            podiumFinishes = podiumFinishes,
+            preferredCar = preferredCar,
+            id = id
+        )
+    }
+
+    /**
+     * Updates preferred vehicle for the driver.
+     */
+    suspend fun updatePreferredCar(
+        preferredCar: String,
+        id: String = "primary_driver"
+    ) = withContext(ioDispatcher) {
+        driverProfileRepository.updatePreferredCar(preferredCar = preferredCar, id = id)
     }
 
     /**

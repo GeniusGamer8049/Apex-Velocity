@@ -120,6 +120,98 @@ class DriverProfileRepository(
     }
 
     /**
+     * Updates player racing statistics: total races completed, podium finishes, and preferred car.
+     */
+    suspend fun updatePlayerStatistics(
+        racesCompleted: Int,
+        podiumFinishes: Int,
+        preferredCar: String,
+        id: String = "primary_driver"
+    ) = withContext(ioDispatcher) {
+        val current = driverProfileDao.getDriverProfile(id)
+        if (current != null) {
+            driverProfileDao.updatePlayerStatistics(
+                id = id,
+                racesCompleted = racesCompleted,
+                podiums = podiumFinishes,
+                preferredCar = preferredCar,
+                timestamp = System.currentTimeMillis()
+            )
+        } else {
+            driverProfileDao.insertOrUpdateProfile(
+                DriverProfile(
+                    id = id,
+                    totalRacesCompleted = racesCompleted,
+                    totalPodiums = podiumFinishes,
+                    podiumFinishes = podiumFinishes,
+                    selectedVehicleId = preferredCar,
+                    preferredCar = preferredCar,
+                    lastUpdatedTimestamp = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    /**
+     * Updates preferred vehicle for the driver.
+     */
+    suspend fun updatePreferredCar(
+        preferredCar: String,
+        id: String = "primary_driver"
+    ) = withContext(ioDispatcher) {
+        val current = driverProfileDao.getDriverProfile(id)
+        if (current != null) {
+            driverProfileDao.updatePreferredCar(id = id, preferredCar = preferredCar)
+        } else {
+            driverProfileDao.insertOrUpdateProfile(
+                DriverProfile(
+                    id = id,
+                    selectedVehicleId = preferredCar,
+                    preferredCar = preferredCar,
+                    lastUpdatedTimestamp = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    /**
+     * Increments the count of completed races for the driver.
+     */
+    suspend fun recordRaceCompleted(id: String = "primary_driver") = withContext(ioDispatcher) {
+        val current = driverProfileDao.getDriverProfile(id)
+        if (current != null) {
+            driverProfileDao.incrementRacesCompleted(id)
+        } else {
+            driverProfileDao.insertOrUpdateProfile(
+                DriverProfile(
+                    id = id,
+                    totalRacesCompleted = 1,
+                    lastUpdatedTimestamp = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    /**
+     * Increments the count of podium finishes for the driver.
+     */
+    suspend fun recordPodiumFinish(id: String = "primary_driver") = withContext(ioDispatcher) {
+        val current = driverProfileDao.getDriverProfile(id)
+        if (current != null) {
+            driverProfileDao.incrementPodiumFinishes(id)
+        } else {
+            driverProfileDao.insertOrUpdateProfile(
+                DriverProfile(
+                    id = id,
+                    totalPodiums = 1,
+                    podiumFinishes = 1,
+                    lastUpdatedTimestamp = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    /**
      * Deletes a driver profile.
      */
     suspend fun deleteProfile(id: String = "primary_driver") = withContext(ioDispatcher) {

@@ -7,6 +7,8 @@ import androidx.room.PrimaryKey
 /**
  * DriverProfile Room entity storing player identity, avatar path,
  * total distance driven, total career wins, and racing progression.
+ * Persists player statistics including total races completed, podium finishes,
+ * and preferred car.
  */
 @Entity(tableName = "driver_profile")
 data class DriverProfile(
@@ -19,8 +21,10 @@ data class DriverProfile(
     val credits: Int = 2500,
     val reputation: Int = 0,
     val selectedVehicleId: String = "apex_gt86",
+    val preferredCar: String = "apex_gt86",
     val totalRacesCompleted: Int = 0,
     val totalPodiums: Int = 0,
+    val podiumFinishes: Int = 0,
     val totalDriftDistance: Double = 0.0,
     val highestSpeedKmh: Float = 0f,
     val cleanRacesCount: Int = 0,
@@ -33,6 +37,9 @@ data class DriverProfile(
     val driverCountry: String @Ignore get() = country
     val totalRaceWins: Int @Ignore get() = totalWins
     val totalDistanceDrivenMeters: Float @Ignore get() = totalDistance.toFloat()
+    val racesCompleted: Int @Ignore get() = totalRacesCompleted
+    val effectivePodiums: Int @Ignore get() = if (podiumFinishes > 0) podiumFinishes else totalPodiums
+    val preferredVehicle: String @Ignore get() = if (preferredCar.isNotBlank()) preferredCar else selectedVehicleId
 }
 
 typealias DriverProfileEntity = DriverProfile

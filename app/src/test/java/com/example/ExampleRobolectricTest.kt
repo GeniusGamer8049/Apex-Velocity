@@ -1409,7 +1409,301 @@ class ExampleRobolectricTest {
         onDismiss()
         assertTrue(dismissed)
     }
+
+    @Test
+    fun `test DriverProfile Room entity and DAO player statistics persistence and updates`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = com.example.data.room.AppDatabase.getDatabase(context)
+        val profileDao = db.driverProfileDao()
+
+        // Clean slate
+        profileDao.deleteProfileById("stat_test_driver")
+
+        // 1. Create and insert DriverProfile Room entity with statistics
+        val profile = com.example.data.room.DriverProfile(
+            id = "stat_test_driver",
+            username = "Apex Champion",
+            totalRacesCompleted = 42,
+            totalPodiums = 28,
+            podiumFinishes = 28,
+            preferredCar = "hyper_valkyrie",
+            selectedVehicleId = "hyper_valkyrie",
+            totalWins = 18,
+            totalDistance = 56000.0
+        )
+        profileDao.insertDriverProfile(profile)
+
+        // 2. Retrieve entity and verify fields
+        val retrieved = profileDao.getDriverProfile("stat_test_driver")
+        assertNotNull("Retrieved DriverProfile must not be null", retrieved)
+        assertEquals(42, retrieved!!.totalRacesCompleted)
+        assertEquals(28, retrieved.podiumFinishes)
+        assertEquals(28, retrieved.totalPodiums)
+        assertEquals("hyper_valkyrie", retrieved.preferredCar)
+        assertEquals("hyper_valkyrie", retrieved.selectedVehicleId)
+        assertEquals(18, retrieved.totalWins)
+        assertEquals("Apex Champion", retrieved.username)
+
+        // 3. Update player statistics via DAO
+        profileDao.updatePlayerStatistics(
+            id = "stat_test_driver",
+            racesCompleted = 50,
+            podiums = 35,
+            preferredCar = "phantom_gtr"
+        )
+        val updatedStats = profileDao.getDriverProfile("stat_test_driver")
+        assertNotNull(updatedStats)
+        assertEquals(50, updatedStats!!.totalRacesCompleted)
+        assertEquals(35, updatedStats.podiumFinishes)
+        assertEquals(35, updatedStats.totalPodiums)
+        assertEquals("phantom_gtr", updatedStats.preferredCar)
+
+        // 4. Increment races completed
+        profileDao.incrementRacesCompleted("stat_test_driver")
+        val incRace = profileDao.getDriverProfile("stat_test_driver")
+        assertEquals(51, incRace?.totalRacesCompleted)
+
+        // 5. Increment podium finishes
+        profileDao.incrementPodiumFinishes("stat_test_driver")
+        val incPodium = profileDao.getDriverProfile("stat_test_driver")
+        assertEquals(36, incPodium?.podiumFinishes)
+        assertEquals(36, incPodium?.totalPodiums)
+
+        // 6. Update preferred vehicle
+        profileDao.updatePreferredCar("stat_test_driver", "monaco_stradale")
+        val updatedCar = profileDao.getDriverProfile("stat_test_driver")
+        assertEquals("monaco_stradale", updatedCar?.preferredCar)
+
+        // 7. Verify reactive flow observation
+        val flowProfile = profileDao.getDriverProfileFlow("stat_test_driver").first()
+        assertNotNull(flowProfile)
+        assertEquals(51, flowProfile!!.totalRacesCompleted)
+        assertEquals(36, flowProfile.podiumFinishes)
+        assertEquals("monaco_stradale", flowProfile.preferredCar)
+
+        // Cleanup
+        profileDao.deleteProfileById("stat_test_driver")
+    }
+
+    @Test
+    fun `test Achievements Room entity and DAO milestone persistence`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = com.example.data.room.AppDatabase.getDatabase(context)
+        val dao = database.achievementsDao()
+
+        // 1. Seed default achievements
+        dao.insertAchievements(com.example.data.room.DefaultAchievements.createDefaultList())
+
+        // 2. Verify all milestones exist
+        val firstWin = dao.getAchievementById("first_win")
+        assertNotNull("First Win milestone must exist", firstWin)
+        assertEquals("First Win", firstWin!!.title)
+        assertEquals(1f, firstWin.targetProgress, 0.01f)
+        assertEquals(0f, firstWin.currentProgress, 0.01f)
+        assertFalse(firstWin.isUnlocked)
+
+        val hundredMiles = dao.getAchievementById("100_miles_driven")
+        assertNotNull("100 Miles Driven milestone must exist", hundredMiles)
+        assertEquals("100 Miles Driven", hundredMiles!!.title)
+        assertEquals(160934f, hundredMiles.targetProgress, 0.01f)
+        assertEquals("m", hundredMiles.unit)
+        assertFalse(hundredMiles.isUnlocked)
+
+        val cleanLap = dao.getAchievementById("clean_lap")
+        assertNotNull("Clean Lap milestone must exist", cleanLap)
+        assertEquals("Clean Lap", cleanLap!!.title)
+        assertFalse(cleanLap.isUnlocked)
+
+        // 3. Test progress update (partial progress)
+        dao.updateProgress("100_miles_driven", 80467f)
+        val partialHundredMiles = dao.getAchievementById("100_miles_driven")
+        assertNotNull(partialHundredMiles)
+        assertEquals(80467f, partialHundredMiles!!.currentProgress, 0.01f)
+        assertFalse(partialHundredMiles.isUnlocked)
+        assertEquals(0.5f, partialHundredMiles.progressFraction, 0.01f)
+        assertEquals(50, partialHundredMiles.progressPercent)
+
+        // 4. Test reaching target unlocks milestone
+        dao.updateProgress("100_miles_driven", 160934f)
+        val completedHundredMiles = dao.getAchievementById("100_miles_driven")
+        assertNotNull(completedHundredMiles)
+        assertTrue("Milestone must unlock upon reaching target", completedHundredMiles!!.isUnlocked)
+        assertTrue("Unlock timestamp should be set", (completedHundredMiles.unlockedTimestamp ?: 0L) > 0)
+        assertEquals(1.0f, completedHundredMiles.progressFraction, 0.01f)
+        assertEquals(100, completedHundredMiles.progressPercent)
+
+        // 5. Test direct milestone unlock
+        dao.unlockAchievement("clean_lap")
+        val unlockedCleanLap = dao.getAchievementById("clean_lap")
+        assertNotNull(unlockedCleanLap)
+        assertTrue(unlockedCleanLap!!.isUnlocked)
+        assertEquals(unlockedCleanLap.targetProgress, unlockedCleanLap.currentProgress, 0.01f)
+
+        // 6. Test flow observations
+        val allAchievements = dao.getAllAchievementsFlow().first()
+        assertTrue("All achievements should be populated", allAchievements.size >= 8)
+
+        val unlockedAchievements = dao.getUnlockedAchievementsFlow().first()
+        assertTrue("Unlocked achievements should contain unlocked milestones", unlockedAchievements.size >= 2)
+        assertTrue(unlockedAchievements.any { it.id == "100_miles_driven" })
+        assertTrue(unlockedAchievements.any { it.id == "clean_lap" })
+
+        val unlockedCount = dao.getUnlockedCountFlow().first()
+        assertEquals(unlockedAchievements.size, unlockedCount)
+    }
+
+    @Test
+    fun `test AchievementsRepository milestone syncing with DriverProfile`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = com.example.data.room.AppDatabase.getDatabase(context)
+        val repository = com.example.data.AchievementsRepository(database.achievementsDao())
+
+        // Initialize defaults
+        repository.initDefaultAchievementsIfNeeded()
+
+        // Verify initial state
+        val initialList = repository.allAchievementsFlow.first()
+        assertTrue(initialList.isNotEmpty())
+
+        // Create a driver profile with 5 wins, 200,000 meters driven, and 8 podiums
+        val profile = com.example.data.room.DriverProfile(
+            id = "test_profile_sync",
+            username = "SpeedDemon",
+            totalRacesCompleted = 20,
+            podiumFinishes = 8,
+            preferredCar = "monaco_stradale",
+            totalWins = 5,
+            totalDistance = 200_000.0,
+            cleanRacesCount = 12
+        )
+
+        // Sync with driver profile
+        repository.syncWithDriverProfile(profile)
+
+        // Check that 'First Win' and '100 Miles Driven' are now unlocked
+        val allAfterSync = repository.allAchievementsFlow.first()
+        val firstWin = allAfterSync.find { it.id == "first_win" }
+        assertNotNull(firstWin)
+        assertTrue("First Win should be unlocked after sync", firstWin!!.isUnlocked)
+
+        val hundredMiles = allAfterSync.find { it.id == "100_miles_driven" }
+        assertNotNull(hundredMiles)
+        assertTrue("100 Miles Driven should be unlocked after sync", hundredMiles!!.isUnlocked)
+
+        val podiumMaster = allAfterSync.find { it.id == "podium_master" }
+        assertNotNull(podiumMaster)
+        assertTrue("Podium Master (target 5) should be unlocked with 8 podiums", podiumMaster!!.isUnlocked)
+    }
+
+    @Test
+    fun `test DailyChallenges Room entity and DAO persistence and progress tracking`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = com.example.data.room.AppDatabase.getDatabase(context)
+        val dao = database.dailyChallengesDao()
+
+        val testDate = "2026-11-04"
+        val expiryTime = System.currentTimeMillis() + 86400000L
+
+        // 1. Create and insert limited-time task
+        val challenge = com.example.data.room.DailyChallenges(
+            id = "${testDate}_speed_test",
+            dateKey = testDate,
+            type = com.example.data.room.DailyChallengesGenerator.TYPE_TOP_SPEED,
+            title = "Speed Trial 240",
+            description = "Reach 240 km/h in any circuit event",
+            targetValue = 240,
+            currentValue = 0,
+            rewardCredits = 4500,
+            rewardRep = 150,
+            iconEmoji = "⚡",
+            expiresAtTimestamp = expiryTime
+        )
+        dao.insertChallenge(challenge)
+
+        // 2. Query challenge by ID and date key
+        val retrieved = dao.getChallengeById("${testDate}_speed_test")
+        assertNotNull("Challenge must be persisted in Room", retrieved)
+        assertEquals("Speed Trial 240", retrieved!!.title)
+        assertEquals(240, retrieved.targetValue)
+        assertEquals(0, retrieved.currentValue)
+        assertFalse(retrieved.isCompleted)
+        assertFalse(retrieved.isClaimed)
+        assertFalse(retrieved.isExpired)
+
+        // 3. Test progress update (partial)
+        dao.updateProgress("${testDate}_speed_test", 180)
+        val partial = dao.getChallengeById("${testDate}_speed_test")
+        assertNotNull(partial)
+        assertEquals(180, partial!!.currentValue)
+        assertEquals(0.75f, partial.progressFraction, 0.01f)
+        assertEquals(75, partial.progressPercent)
+        assertFalse(partial.isTaskFinished)
+        assertFalse(partial.isReadyToClaim)
+
+        // 4. Test progress increment reaching target
+        dao.incrementProgress("${testDate}_speed_test", 60)
+        val completed = dao.getChallengeById("${testDate}_speed_test")
+        assertNotNull(completed)
+        assertEquals(240, completed!!.currentValue)
+        assertTrue("Task should be completed when target reached", completed.isTaskFinished)
+        assertTrue("Ready to claim when finished and unclaimed", completed.isReadyToClaim)
+
+        // 5. Claim reward
+        dao.claimReward("${testDate}_speed_test")
+        val claimed = dao.getChallengeById("${testDate}_speed_test")
+        assertNotNull(claimed)
+        assertTrue(claimed!!.isClaimed)
+        assertFalse("Should not be ready to claim once claimed", claimed.isReadyToClaim)
+
+        // 6. Test date-specific flow observation
+        val dateFlowList = dao.getChallengesForDateFlow(testDate).first()
+        assertTrue(dateFlowList.any { it.id == "${testDate}_speed_test" })
+
+        // Cleanup
+        dao.deleteChallengeById("${testDate}_speed_test")
+    }
+
+    @Test
+    fun `test DailyChallengesRepository generation and claim workflow`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = com.example.data.room.AppDatabase.getDatabase(context)
+        val repository = com.example.data.DailyChallengesRepository(database.dailyChallengesDao())
+
+        val testDate = "2026-11-05"
+        // 1. Ensure challenges are generated
+        val challenges = repository.ensureTodayChallenges(testDate)
+        assertEquals("Must generate 3 limited-time daily objectives", 3, challenges.size)
+
+        // 2. Check each challenge has valid parameters
+        challenges.forEach { ch ->
+            assertEquals(testDate, ch.dateKey)
+            assertTrue("Target must be positive", ch.targetValue > 0)
+            assertTrue("Reward credits must be positive", ch.rewardCredits > 0)
+            assertTrue("Expiry timestamp must be in future", ch.expiresAtTimestamp > System.currentTimeMillis())
+            assertFalse(ch.isClaimed)
+        }
+
+        // 3. Update progress for one of the challenge types
+        val firstType = challenges.first().type
+        repository.updateProgress(firstType, 99999, dateKey = testDate)
+
+        val updatedList = database.dailyChallengesDao().getChallengesForDate(testDate)
+        val completedTask = updatedList.first { it.type == firstType }
+        assertTrue("Task with updated progress should be finished", completedTask.isTaskFinished)
+
+        // 4. Claim challenge via repository
+        val claimedResult = repository.claimChallenge(completedTask.id)
+        assertNotNull("Claimed task should return non-null entity", claimedResult)
+        assertTrue(claimedResult!!.isClaimed)
+
+        // 5. Attempting to claim again should return null
+        val reClaimResult = repository.claimChallenge(completedTask.id)
+        org.junit.Assert.assertNull("Cannot claim already claimed task", reClaimResult)
+    }
 }
+
+
+
 
 
 

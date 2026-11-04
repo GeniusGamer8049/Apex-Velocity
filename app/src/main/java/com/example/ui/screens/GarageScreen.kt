@@ -58,10 +58,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.PlayerProfile
+import com.example.data.room.DailyChallenges
 import com.example.model.TireCompound
 import com.example.model.Vehicle
 import com.example.model.VehicleUpgrades
 import com.example.ui.components.DailyChallengesCard
+import com.example.ui.components.DailyChallengesSection
 import com.example.ui.theme.ApexCyan
 import com.example.ui.theme.ApexGold
 import com.example.ui.theme.ApexGreen
@@ -81,6 +83,7 @@ import com.example.ui.theme.TextWhite
 @Composable
 fun GarageScreen(
     profile: PlayerProfile,
+    dailyChallenges: List<DailyChallenges> = emptyList(),
     onSelectVehicle: (String) -> Unit,
     onPurchaseVehicle: (String) -> Unit,
     onUpgradeVehicle: (String, String) -> Unit,
@@ -327,14 +330,23 @@ fun GarageScreen(
             }
         }
 
-        // Daily Objectives Card
+        // Daily Objectives & Limited-Time Active Challenges Card
         item {
-            DailyChallengesCard(
-                challenges = profile.dailyChallenges,
-                allBonusClaimed = profile.allChallengesBonusClaimed,
-                onClaimChallenge = onClaimChallenge,
-                onClaimAllBonus = onClaimAllBonus
-            )
+            if (dailyChallenges.isNotEmpty()) {
+                DailyChallengesSection(
+                    challenges = dailyChallenges,
+                    onClaimChallenge = onClaimChallenge,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else {
+                DailyChallengesCard(
+                    challenges = profile.dailyChallenges,
+                    allBonusClaimed = profile.allChallengesBonusClaimed,
+                    onClaimChallenge = onClaimChallenge,
+                    onClaimAllBonus = onClaimAllBonus,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
 
         // Section Tabs: Performance Upgrades vs Customization Paint

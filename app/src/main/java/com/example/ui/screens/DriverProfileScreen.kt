@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -31,6 +32,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.Button
@@ -44,6 +46,10 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -51,6 +57,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -67,7 +74,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.AchievementsRepository
 import com.example.data.DriverProfileRepository
+import com.example.data.room.Achievements
+import com.example.data.room.DefaultAchievements
 import com.example.data.room.DriverProfile
 import com.example.ui.MainViewModel
 import com.example.ui.components.AvatarSize
@@ -101,6 +111,7 @@ fun DriverProfileScreen(
 ) {
     DriverProfileScreen(
         repository = viewModel.driverProfileRepository,
+        achievementsRepository = viewModel.achievementsRepository,
         onBack = onBack,
         onOpenRaceHistory = onOpenRaceHistory,
         modifier = modifier
@@ -113,7 +124,8 @@ fun DriverProfileScreen(
     onBack: () -> Unit = {},
     onOpenRaceHistory: () -> Unit = {},
     modifier: Modifier = Modifier,
-    repository: DriverProfileRepository = DriverProfileRepository.getInstance(LocalContext.current)
+    repository: DriverProfileRepository = DriverProfileRepository.getInstance(LocalContext.current),
+    achievementsRepository: AchievementsRepository = AchievementsRepository.getInstance(LocalContext.current)
 ) {
     BackHandler { onBack() }
 
@@ -130,6 +142,24 @@ fun DriverProfileScreen(
             totalWins = 0,
             country = "US"
         )
+    }
+
+    var selectedTab by remember { mutableIntStateOf(0) }
+    val achievementsList by achievementsRepository.allAchievementsFlow.collectAsState(initial = emptyList())
+    val displayedAchievements = remember(achievementsList) {
+        achievementsList.ifEmpty { DefaultAchievements.createDefaultList() }
+    }
+
+    // Initialize default Room achievements if needed
+    LaunchedEffect(Unit) {
+        achievementsRepository.initDefaultAchievementsIfNeeded()
+    }
+
+    // Sync milestones when profile emits
+    LaunchedEffect(profileState) {
+        profileState?.let {
+            achievementsRepository.syncWithDriverProfile(it)
+        }
     }
 
     var usernameInput by remember { mutableStateOf("") }
@@ -213,13 +243,85 @@ fun DriverProfileScreen(
                 Spacer(modifier = Modifier.height(4.dp))
             }
 
-            // 1. Hero Identity Card
+            // Tab Switcher: Overview vs Achievements
             item {
-                DriverHeroCard(
-                    profile = currentProfile,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                TabRow(
+                    selectedTabIndex = selectedTab,
+                    containerColor = DarkSurface,
+                    contentColor = TextWhite,
+                    indicator = { tabPositions ->
+                        TabRowDefaults.SecondaryIndicator(
+                            Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                            color = ApexCyan,
+                            height = 3.dp
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(1.dp, SurfaceBorder, RoundedCornerShape(12.dp))
+                        .testTag("driver_profile_tabs")
+                ) {
+                    Tab(
+                        selected = selectedTab == 0,
+                        onClick = { selectedTab = 0 },
+                        text = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Person,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = if (selectedTab == 0) ApexCyan else TextMuted
+                                )
+                                Text(
+                                    text = "OVERVIEW",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = if (selectedTab == 0) ApexCyan else TextMuted
+                                )
+                            }
+                        },
+                        modifier = Modifier.testTag("tab_overview")
+                    )
+
+                    Tab(
+                        selected = selectedTab == 1,
+                        onClick = { selectedTab = 1 },
+                        text = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.EmojiEvents,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = if (selectedTab == 1) ApexGold else TextMuted
+                                )
+                                Text(
+                                    text = "ACHIEVEMENTS",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = if (selectedTab == 1) ApexGold else TextMuted
+                                )
+                            }
+                        },
+                        modifier = Modifier.testTag("tab_achievements")
+                    )
+                }
             }
+
+            if (selectedTab == 0) {
+                // 1. Hero Identity Card
+                item {
+                    DriverHeroCard(
+                        profile = currentProfile,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
 
             // 2. Edit Username Card (Requested feature)
             item {
@@ -609,12 +711,30 @@ fun DriverProfileScreen(
                     )
                 }
             }
-
+        } else {
+            // ACHIEVEMENTS TAB
             item {
-                Spacer(modifier = Modifier.height(24.dp))
+                AchievementsSummaryCard(
+                    achievements = displayedAchievements,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            items(displayedAchievements, key = { it.id }) { achievement ->
+                AchievementMilestoneCard(
+                    achievement = achievement,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("achievement_item_${achievement.id}")
+                )
             }
         }
+
+        item {
+            Spacer(modifier = Modifier.height(24.dp))
+        }
     }
+}
 }
 
 @Composable
@@ -797,5 +917,344 @@ private fun getCountryFlag(countryCode: String): String {
         "SE" -> "🇸🇪"
         "MX" -> "🇲🇽"
         else -> "🏁"
+    }
+}
+
+@Composable
+private fun AchievementsSummaryCard(
+    achievements: List<Achievements>,
+    modifier: Modifier = Modifier
+) {
+    val unlockedCount = achievements.count { it.isUnlocked }
+    val totalCount = achievements.size.coerceAtLeast(1)
+    val progressFraction = (unlockedCount.toFloat() / totalCount.toFloat()).coerceIn(0f, 1f)
+    val totalCreditsEarned = achievements.filter { it.isUnlocked }.sumOf { it.rewardCredits }
+    val totalRepEarned = achievements.filter { it.isUnlocked }.sumOf { it.rewardRep }
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("achievements_summary_card"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
+        border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(ApexGold.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.EmojiEvents,
+                            contentDescription = null,
+                            tint = ApexGold,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "MILESTONE ACHIEVEMENTS",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 15.sp,
+                            color = TextWhite,
+                            letterSpacing = 0.5.sp
+                        )
+                        Text(
+                            text = "Persisted to Room Database",
+                            fontSize = 11.sp,
+                            color = ApexCyan
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(DarkSurface)
+                        .border(1.dp, SurfaceBorder, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = "$unlockedCount / $totalCount",
+                        fontWeight = FontWeight.Black,
+                        fontSize = 13.sp,
+                        color = ApexGold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+
+            LinearProgressIndicator(
+                progress = { progressFraction },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(4.dp)),
+                color = ApexGold,
+                trackColor = DarkSurface
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${(progressFraction * 100).toInt()}% Milestones Completed",
+                    fontSize = 11.sp,
+                    color = TextMuted,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "+$totalCreditsEarned CR",
+                        fontSize = 11.sp,
+                        color = ApexGreen,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        text = "•",
+                        fontSize = 11.sp,
+                        color = TextMuted
+                    )
+                    Text(
+                        text = "+$totalRepEarned REP",
+                        fontSize = 11.sp,
+                        color = ApexGold,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AchievementMilestoneCard(
+    achievement: Achievements,
+    modifier: Modifier = Modifier
+) {
+    val isUnlocked = achievement.isUnlocked
+    val icon = when (achievement.id) {
+        DefaultAchievements.ID_FIRST_WIN -> Icons.Default.EmojiEvents
+        DefaultAchievements.ID_100_MILES -> Icons.Default.DriveEta
+        DefaultAchievements.ID_CLEAN_LAP -> Icons.Default.Shield
+        DefaultAchievements.ID_PODIUM_MASTER -> Icons.Default.MilitaryTech
+        DefaultAchievements.ID_SPEED_DEMON -> Icons.Default.Speed
+        DefaultAchievements.ID_DRIFT_KING -> Icons.Default.Star
+        DefaultAchievements.ID_WET_RACER -> Icons.Default.WaterDrop
+        DefaultAchievements.ID_TUNING_PRO -> Icons.Default.Build
+        else -> when (achievement.iconName) {
+            "emoji_events" -> Icons.Default.EmojiEvents
+            "drive_eta" -> Icons.Default.DriveEta
+            "shield" -> Icons.Default.Shield
+            "military_tech" -> Icons.Default.MilitaryTech
+            "speed" -> Icons.Default.Speed
+            "star" -> Icons.Default.Star
+            "water_drop" -> Icons.Default.WaterDrop
+            "build" -> Icons.Default.Build
+            else -> Icons.Default.EmojiEvents
+        }
+    }
+
+    val borderColor = if (isUnlocked) ApexGreen.copy(alpha = 0.6f) else SurfaceBorder
+    val iconTint = if (isUnlocked) ApexGold else TextMuted
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(16.dp)),
+        colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Header Row: Icon, Title & Category, Status Tag
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(if (isUnlocked) ApexGold.copy(alpha = 0.15f) else DarkSurface)
+                            .border(1.dp, if (isUnlocked) ApexGold.copy(alpha = 0.5f) else SurfaceBorder, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = iconTint,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Column {
+                        Text(
+                            text = achievement.title,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = TextWhite
+                        )
+                        Text(
+                            text = achievement.category.uppercase(),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = ApexCyan,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                }
+
+                // Status Badge
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isUnlocked) ApexGreen.copy(alpha = 0.15f) else DarkSurface)
+                        .border(
+                            1.dp,
+                            if (isUnlocked) ApexGreen.copy(alpha = 0.6f) else SurfaceBorder,
+                            RoundedCornerShape(8.dp)
+                        )
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (isUnlocked) "UNLOCKED" else "IN PROGRESS",
+                        fontWeight = FontWeight.Black,
+                        fontSize = 10.sp,
+                        color = if (isUnlocked) ApexGreen else TextMuted,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+            }
+
+            // Description
+            Text(
+                text = achievement.description,
+                fontSize = 12.sp,
+                color = TextMuted,
+                lineHeight = 16.sp
+            )
+
+            // Progress Bar
+            val progressFraction = achievement.progressFraction
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (isUnlocked) {
+                            "Completed"
+                        } else {
+                            val currStr = if (achievement.targetProgress >= 1000f) {
+                                String.format(Locale.US, "%,d", achievement.currentProgress.toLong())
+                            } else {
+                                String.format(Locale.US, "%.0f", achievement.currentProgress)
+                            }
+                            val targetStr = if (achievement.targetProgress >= 1000f) {
+                                String.format(Locale.US, "%,d", achievement.targetProgress.toLong())
+                            } else {
+                                String.format(Locale.US, "%.0f", achievement.targetProgress)
+                            }
+                            "$currStr / $targetStr ${achievement.unit}".trim()
+                        },
+                        fontSize = 11.sp,
+                        color = if (isUnlocked) ApexGreen else TextWhite,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace
+                    )
+
+                    Text(
+                        text = "${achievement.progressPercent}%",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isUnlocked) ApexGreen else ApexCyan,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                LinearProgressIndicator(
+                    progress = { progressFraction },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = if (isUnlocked) ApexGreen else ApexCyan,
+                    trackColor = DarkSurface
+                )
+            }
+
+            // Rewards Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(DarkSurface)
+                        .border(1.dp, ApexGreen.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "+${String.format(Locale.US, "%,d", achievement.rewardCredits)} CR",
+                        color = ApexGreen,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(DarkSurface)
+                        .border(1.dp, ApexGold.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "+${achievement.rewardRep} REP",
+                        color = ApexGold,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        }
     }
 }

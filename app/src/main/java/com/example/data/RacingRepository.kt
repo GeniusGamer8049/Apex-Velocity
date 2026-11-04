@@ -23,8 +23,14 @@ import org.json.JSONObject
 import com.example.data.room.AppDatabase
 import com.example.data.room.DriverProfileDao
 import com.example.data.room.GameStatisticsDao
+import com.example.data.room.AchievementsDao
+import com.example.data.room.Achievements
 import com.example.data.room.DriverProfile
 import com.example.data.room.GameStatistics
+import com.example.data.room.DailyChallengesDao
+import com.example.data.room.DailyChallenges
+import com.example.data.room.DailyChallengesGenerator
+import com.example.data.DailyChallengesRepository
 import com.example.model.Achievement
 import com.example.model.AchievementRegistry
 import com.example.model.ChallengeType
@@ -79,9 +85,13 @@ class RacingRepository(private val context: Context) {
     private val appDb = AppDatabase.getDatabase(context)
     val driverProfileDao: DriverProfileDao = appDb.driverProfileDao()
     val gameStatisticsDao: GameStatisticsDao = appDb.gameStatisticsDao()
-    val dataRepository: DataRepository = DataRepository(driverProfileDao, gameStatisticsDao)
+    val achievementsDao: AchievementsDao = appDb.achievementsDao()
+    val dailyChallengesDao: DailyChallengesDao = appDb.dailyChallengesDao()
+    val dataRepository: DataRepository = DataRepository(driverProfileDao, gameStatisticsDao, achievementsDao, dailyChallengesDao)
     val driverProfileRepository: DriverProfileRepository = dataRepository.driverProfileRepository
     val gameStatisticsRepository: GameStatisticsRepository = dataRepository.gameStatisticsRepository
+    val achievementsRepository: AchievementsRepository = AchievementsRepository(achievementsDao)
+    val dailyChallengesRepository: DailyChallengesRepository = DailyChallengesRepository(dailyChallengesDao)
     private val repoScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val _profile = MutableStateFlow(loadProfile())
@@ -91,6 +101,14 @@ class RacingRepository(private val context: Context) {
 
     init {
         loadGhostLaps()
+        repoScope.launch {
+            try {
+                achievementsRepository.initDefaultAchievementsIfNeeded()
+            } catch (ignored: Exception) {}
+            try {
+                dailyChallengesRepository.ensureTodayChallenges()
+            } catch (ignored: Exception) {}
+        }
     }
 
     private fun loadProfile(): PlayerProfile {
@@ -264,14 +282,18 @@ class RacingRepository(private val context: Context) {
                         credits = profile.credits,
                         reputation = profile.reputation,
                         selectedVehicleId = profile.selectedVehicleId,
+                        preferredCar = profile.selectedVehicleId,
                         totalRacesCompleted = profile.totalRacesCompleted,
                         totalPodiums = profile.totalPodiums,
+                        podiumFinishes = profile.totalPodiums,
                         totalDriftDistance = profile.totalDriftDistanceMeters.toDouble(),
                         highestSpeedKmh = profile.highestSpeedKmh,
                         cleanRacesCount = profile.cleanRacesCount,
                         wetRaceWinsCount = profile.wetRaceWinsCount,
                         equippedBadgeId = profile.equippedBadgeId
-                    )
+                    ).also { savedProfile ->
+                        achievementsRepository.syncWithDriverProfile(savedProfile)
+                    }
                 )
             } catch (ignored: Exception) {}
         }
@@ -296,6 +318,25 @@ class RacingRepository(private val context: Context) {
         if (changed) {
             saveProfile(curr.copy(dailyChallenges = updated))
         }
+
+        // Sync with Room DailyChallenges
+        val roomType = when (type) {
+            ChallengeType.DRIFT_POINTS -> DailyChallengesGenerator.TYPE_DRIFT_POINTS
+            ChallengeType.TOP_SPEED -> DailyChallengesGenerator.TYPE_TOP_SPEED
+            ChallengeType.CLEAN_RACE -> DailyChallengesGenerator.TYPE_CLEAN_RACE
+            ChallengeType.WET_RACE_WIN -> DailyChallengesGenerator.TYPE_WET_RACE_WIN
+            ChallengeType.PODIUM_FINISH -> DailyChallengesGenerator.TYPE_PODIUM_FINISH
+            ChallengeType.COMPLETE_LAPS -> DailyChallengesGenerator.TYPE_COMPLETE_LAPS
+        }
+        repoScope.launch {
+            try {
+                if (absoluteValue > 0) {
+                    dailyChallengesRepository.updateProgress(roomType, absoluteValue)
+                } else if (addValue > 0) {
+                    dailyChallengesRepository.incrementProgress(roomType, addValue)
+                }
+            } catch (ignored: Exception) {}
+        }
     }
 
     fun claimChallengeReward(challengeId: String): Boolean {
@@ -313,7 +354,24 @@ class RacingRepository(private val context: Context) {
                 dailyChallenges = updated
             )
         )
+        repoScope.launch {
+            try {
+                dailyChallengesRepository.claimChallenge(challengeId)
+            } catch (ignored: Exception) {}
+        }
         return true
+    }
+
+    fun claimRoomDailyChallenge(challengeId: String) {
+        claimChallengeReward(challengeId)
+        repoScope.launch {
+            try {
+                val claimed = dailyChallengesRepository.claimChallenge(challengeId)
+                if (claimed != null) {
+                    addRewards(claimed.rewardCredits, claimed.rewardRep)
+                }
+            } catch (ignored: Exception) {}
+        }
     }
 
     fun claimAllDailyBonus(): Boolean {
