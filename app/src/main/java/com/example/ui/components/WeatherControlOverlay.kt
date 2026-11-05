@@ -26,10 +26,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -44,7 +48,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
@@ -54,6 +57,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.WeatherCondition
 import com.example.model.WeatherManager
+import com.example.physics.DynamicWeatherPhysicsService
+import com.example.physics.RaceWeatherCondition
 import com.example.ui.theme.ApexCyan
 import com.example.ui.theme.ApexGold
 import com.example.ui.theme.ApexGreen
@@ -67,23 +72,26 @@ import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextWhite
 
 /**
- * In-game UI overlay allowing drivers to toggle live between Clear, Rain, and Snow conditions,
- * showing immediate telemetry impacts on vehicle handling parameters (grip, braking, traction).
+ * In-game UI overlay allowing drivers to toggle live between Clear, Rain, and Snow conditions
+ * or trigger randomized weather changes during races, displaying real-time vehicle physics adjustments:
+ * dynamic grip, top speed limits, and calculated braking distance.
  */
 @Composable
 fun WeatherControlOverlay(
     modifier: Modifier = Modifier,
     activeCondition: WeatherCondition = WeatherManager.currentCondition.collectAsState().value,
     onWeatherSelected: (WeatherCondition) -> Unit = { WeatherManager.setCondition(it) },
-    showHandlingMetrics: Boolean = true
+    onRandomizeWeather: (() -> Unit)? = null,
+    showHandlingMetrics: Boolean = true,
+    physicsService: DynamicWeatherPhysicsService = DynamicWeatherPhysicsService.getInstance()
 ) {
     var isExpanded by remember { mutableStateOf(false) }
-    val handling = WeatherManager.getHandlingParameters(activeCondition)
+    val dynamicPhysics by physicsService.physicsState.collectAsState()
 
-    val activeAccentColor = when (activeCondition) {
-        WeatherCondition.CLEAR -> ApexGold
-        WeatherCondition.RAIN -> ApexCyan
-        WeatherCondition.SNOW -> Color(0xFFE0F7FA)
+    val activeAccentColor = when (dynamicPhysics.weather) {
+        RaceWeatherCondition.SUNNY -> ApexGold
+        RaceWeatherCondition.RAIN -> ApexCyan
+        RaceWeatherCondition.SNOW -> Color(0xFFE0F7FA)
     }
 
     Card(
@@ -114,15 +122,31 @@ fun WeatherControlOverlay(
                         modifier = Modifier.size(14.dp)
                     )
                     Text(
-                        text = "WEATHER SIM",
+                        text = "WEATHER PHYSICS",
                         color = TextMuted,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Black,
                         letterSpacing = 1.sp
                     )
+
+                    if (dynamicPhysics.isRandomWeatherActive) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(ApexGreen.copy(alpha = 0.2f))
+                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                text = "RANDOM ON",
+                                color = ApexGreen,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
                 }
 
-                // Expand/Collapse Details button
+                // Expand/Collapse Details button with live grip and braking summary
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
@@ -131,9 +155,9 @@ fun WeatherControlOverlay(
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = "${(handling.gripMultiplier * 100).toInt()}% GRIP",
+                        text = "${dynamicPhysics.formattedGripPct} GRIP • STOP ${dynamicPhysics.formattedBrakingDistance100}",
                         color = activeAccentColor,
-                        fontSize = 10.sp,
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
                     )
@@ -146,40 +170,87 @@ fun WeatherControlOverlay(
                 }
             }
 
-            // Segmented 3-Way Weather Toggle Buttons (Clear, Rain, Snow)
+            // Segmented 3-Way Weather Toggle Buttons (Clear, Rain, Snow) + Randomize Action
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 WeatherToggleButton(
                     condition = WeatherCondition.CLEAR,
-                    isSelected = activeCondition == WeatherCondition.CLEAR,
+                    isSelected = dynamicPhysics.weather == RaceWeatherCondition.SUNNY,
                     icon = Icons.Default.WbSunny,
                     accentColor = ApexGold,
-                    onClick = { onWeatherSelected(WeatherCondition.CLEAR) },
+                    onClick = {
+                        onWeatherSelected(WeatherCondition.CLEAR)
+                        physicsService.forceWeather(RaceWeatherCondition.SUNNY)
+                    },
                     testTag = "weather_toggle_clear",
                     modifier = Modifier.weight(1f)
                 )
 
                 WeatherToggleButton(
                     condition = WeatherCondition.RAIN,
-                    isSelected = activeCondition == WeatherCondition.RAIN,
+                    isSelected = dynamicPhysics.weather == RaceWeatherCondition.RAIN,
                     icon = Icons.Default.WaterDrop,
                     accentColor = ApexCyan,
-                    onClick = { onWeatherSelected(WeatherCondition.RAIN) },
+                    onClick = {
+                        onWeatherSelected(WeatherCondition.RAIN)
+                        physicsService.forceWeather(RaceWeatherCondition.RAIN)
+                    },
                     testTag = "weather_toggle_rain",
                     modifier = Modifier.weight(1f)
                 )
 
                 WeatherToggleButton(
                     condition = WeatherCondition.SNOW,
-                    isSelected = activeCondition == WeatherCondition.SNOW,
+                    isSelected = dynamicPhysics.weather == RaceWeatherCondition.SNOW,
                     icon = Icons.Default.AcUnit,
                     accentColor = Color(0xFFE0F7FA),
-                    onClick = { onWeatherSelected(WeatherCondition.SNOW) },
+                    onClick = {
+                        onWeatherSelected(WeatherCondition.SNOW)
+                        physicsService.forceWeather(RaceWeatherCondition.SNOW)
+                    },
                     testTag = "weather_toggle_snow",
                     modifier = Modifier.weight(1f)
                 )
+
+                // Dedicated Randomize Weather Button
+                Box(
+                    modifier = Modifier
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(DarkSurfaceElevated)
+                        .border(1.dp, SurfaceBorder, RoundedCornerShape(8.dp))
+                        .clickable {
+                            if (onRandomizeWeather != null) {
+                                onRandomizeWeather()
+                            } else {
+                                physicsService.triggerRandomWeatherChange()
+                            }
+                        }
+                        .padding(horizontal = 8.dp)
+                        .testTag("randomize_weather_button"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Randomize weather",
+                            tint = ApexGreen,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "RANDOM",
+                            color = ApexGreen,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
             }
 
             // Expandable Telemetry Handling Parameter Metrics
@@ -197,39 +268,94 @@ fun WeatherControlOverlay(
                 ) {
                     // Metric 1: Tire Grip Adhesion
                     HandlingMetricBar(
-                        label = "TIRE ADHESION",
-                        percent = (handling.gripMultiplier * 100).toInt(),
-                        progress = handling.gripMultiplier,
+                        label = "DYNAMIC TIRE GRIP",
+                        percent = (dynamicPhysics.gripMultiplier * 100).toInt(),
+                        progress = dynamicPhysics.gripMultiplier,
                         color = activeAccentColor,
                         testTag = "weather_stats_grip"
                     )
 
-                    // Metric 2: Braking Efficiency
+                    // Metric 2: Braking Distance at 100 km/h (Highlights extended stopping distance)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(DarkSurface)
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .testTag("weather_stats_braking_distance"),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "BRAKING DISTANCE (@100 km/h)",
+                                color = TextMuted,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            val distanceDelta = when (dynamicPhysics.weather) {
+                                RaceWeatherCondition.SUNNY -> "Baseline reference distance"
+                                RaceWeatherCondition.RAIN -> "+47% longer stopping distance!"
+                                RaceWeatherCondition.SNOW -> "+150% longer stopping distance (2.5x)!"
+                            }
+                            Text(
+                                text = distanceDelta,
+                                color = if (dynamicPhysics.weather == RaceWeatherCondition.SUNNY) ApexGreen else ApexOrange,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Text(
+                            text = dynamicPhysics.formattedBrakingDistance100,
+                            color = if (dynamicPhysics.weather == RaceWeatherCondition.SUNNY) ApexGreen else ApexOrange,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    // Metric 3: Top Speed Restriction / Drag
                     HandlingMetricBar(
-                        label = "BRAKE FORCE",
-                        percent = (handling.brakingEfficiencyMultiplier * 100).toInt(),
-                        progress = handling.brakingEfficiencyMultiplier,
-                        color = if (handling.brakingEfficiencyMultiplier < 0.6f) ApexOrange else ApexGreen,
-                        testTag = "weather_stats_braking"
+                        label = "EFFECTIVE TOP SPEED (${dynamicPhysics.formattedTopSpeed})",
+                        percent = (dynamicPhysics.topSpeedMultiplier * 100).toInt(),
+                        progress = dynamicPhysics.topSpeedMultiplier,
+                        color = if (dynamicPhysics.topSpeedMultiplier < 0.90f) ApexOrange else ApexCyan,
+                        testTag = "weather_stats_top_speed"
                     )
 
-                    // Metric 3: Throttle Traction (Wheelspin risk)
+                    // Metric 4: Throttle Traction (Wheelspin risk)
                     HandlingMetricBar(
                         label = "ACCEL TRACTION",
-                        percent = (handling.accelerationTractionMultiplier * 100).toInt(),
-                        progress = handling.accelerationTractionMultiplier,
-                        color = if (handling.accelerationTractionMultiplier < 0.5f) ApexRed else ApexCyan,
+                        percent = (dynamicPhysics.accelerationTractionMultiplier * 100).toInt(),
+                        progress = dynamicPhysics.accelerationTractionMultiplier,
+                        color = if (dynamicPhysics.accelerationTractionMultiplier < 0.5f) ApexRed else ApexCyan,
                         testTag = "weather_stats_traction"
                     )
 
-                    // Brief description
-                    Text(
-                        text = activeCondition.description,
-                        color = TextMuted,
-                        fontSize = 9.sp,
-                        lineHeight = 12.sp,
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
+                    // Alert or Description
+                    if (dynamicPhysics.alertMessage != null) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(top = 2.dp)
+                        ) {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = ApexGold, modifier = Modifier.size(12.dp))
+                            Text(
+                                text = dynamicPhysics.alertMessage ?: "",
+                                color = ApexGold,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = dynamicPhysics.weather.description,
+                            color = TextMuted,
+                            fontSize = 9.sp,
+                            lineHeight = 12.sp,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
                 }
             }
         }

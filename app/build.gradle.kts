@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.apexvelocity.qrvw"
     minSdk = 24
     targetSdk = 36
-    versionCode = 5
-    versionName = "5.0"
+    versionCode = 6
+    versionName = "6.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -103,6 +103,7 @@ dependencies {
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
   // implementation(libs.androidx.navigation.compose)
+  implementation(libs.androidx.work.runtime.ktx)
 
   // Room runtime and KTX dependencies for driver profiles and game statistics
   implementation(libs.androidx.room.ktx)
@@ -135,6 +136,7 @@ dependencies {
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.robolectric)
+  testImplementation(libs.androidx.work.testing)
   androidTestImplementation(platform(libs.androidx.compose.bom))
   androidTestImplementation(libs.androidx.compose.ui.test.junit4)
   androidTestImplementation(libs.androidx.espresso.core)

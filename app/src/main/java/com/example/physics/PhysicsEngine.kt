@@ -47,6 +47,8 @@ data class CarPhysicsState(
     var lastLapTimeMs: Long = 0L,
     var bestLapTimeMs: Long = 0L,
     var driftScore: Int = 0,
+    var estimatedBrakingDistanceM: Float = 38.5f,
+    var effectiveTopSpeedKmh: Float = 240f,
     var raceFinished: Boolean = false
 )
 
@@ -69,7 +71,8 @@ class PhysicsEngine {
         boostInput: Boolean,
         particleSystem: ParticleSystem,
         dt: Float,
-        onCollision: ((intensity: Float) -> Unit)? = null
+        onCollision: ((intensity: Float) -> Unit)? = null,
+        weatherAdjustment: AdjustedVehiclePhysics? = null
     ) {
         if (state.raceFinished) return
 
@@ -135,10 +138,18 @@ class PhysicsEngine {
 
         // Dynamic Weather Handling Parameters
         val weatherHandling = WeatherManager.getHandlingParameters(currentWeather)
+        val gripMult = weatherAdjustment?.gripMultiplier ?: weatherHandling.gripMultiplier
+        val brakeMult = weatherAdjustment?.brakingEfficiencyMultiplier ?: weatherHandling.brakingEfficiencyMultiplier
+        val accelMult = weatherAdjustment?.accelerationTractionMultiplier ?: weatherHandling.accelerationTractionMultiplier
+        val dragMult = weatherAdjustment?.topSpeedDragMultiplier ?: weatherHandling.topSpeedDragMultiplier
+        val steerMult = weatherAdjustment?.steeringResponseMultiplier ?: weatherHandling.steeringResponseMultiplier
 
         // Combined tire grip
-        val baseTireGrip = vehicle.effectiveGripMultiplier * weatherGrip * hazardGripFactor * weatherHandling.gripMultiplier
+        val baseTireGrip = vehicle.effectiveGripMultiplier * weatherGrip * hazardGripFactor * gripMult
         state.effectiveTireGrip = baseTireGrip
+        state.effectiveTopSpeedKmh = weatherAdjustment?.effectiveTopSpeedKmh ?: (vehicle.effectiveTopSpeedKmh / dragMult.coerceAtLeast(0.5f))
+        state.estimatedBrakingDistanceM = weatherAdjustment?.brakingDistanceAtCurrentSpeed
+            ?: if (speedMs > 0.5f) (speedMs * speedMs) / (2f * 9.81f * 1.35f * vehicle.effectiveBrakingPower * brakeMult).coerceAtLeast(0.5f) else 0f
 
         // 4. Boost / Nitrous System
         var boostMultiplier = 1.0f
@@ -193,14 +204,14 @@ class PhysicsEngine {
                 DriveTrain.RWD -> 1.0f
                 DriveTrain.FWD -> 0.90f
             }
-            drivingForce = (torque * currentRatio * finalDrive / wheelRadiusM) * throttleInput * drivetrainFactor * weatherHandling.accelerationTractionMultiplier
+            drivingForce = (torque * currentRatio * finalDrive / wheelRadiusM) * throttleInput * drivetrainFactor * accelMult
         }
 
         var brakingForce = 0f
         state.isBraking = brakeInput > 0.05f
         if (state.isBraking) {
             val baseBrakeForce = (vehicle.effectiveWeightKg * 9.8f) * 1.35f * vehicle.effectiveBrakingPower
-            brakingForce = baseBrakeForce * brakeInput * weatherHandling.brakingEfficiencyMultiplier
+            brakingForce = baseBrakeForce * brakeInput * brakeMult
         }
 
         // Reverse gear handling
@@ -213,7 +224,7 @@ class PhysicsEngine {
         // Aerodynamic Drag & Downforce
         val aeroDownforceFactor = vehicle.effectiveDownforceFactor
         val downforceN = 0.5f * 1.225f * (0.8f + aeroDownforceFactor) * (speedMs * speedMs)
-        val dragForce = 0.5f * 1.225f * 0.34f * 2.1f * (vLong * abs(vLong)) * weatherHandling.topSpeedDragMultiplier
+        val dragForce = 0.5f * 1.225f * 0.34f * 2.1f * (vLong * abs(vLong)) * dragMult
 
         // Rolling resistance & off-track drag
         var rollingResistanceCoeff = 0.015f
@@ -232,7 +243,7 @@ class PhysicsEngine {
         state.slipAngleDeg = Math.toDegrees(slipAngleRad.toDouble()).toFloat()
 
         // Peak slip angle (~7 to 11 degrees)
-        val peakSlipDeg = 8.5f * (1f / baseTireGrip.coerceAtLeast(0.4f)) * (1f / weatherHandling.steeringResponseMultiplier)
+        val peakSlipDeg = 8.5f * (1f / baseTireGrip.coerceAtLeast(0.4f)) * (1f / steerMult)
         val normalizedSlip = (abs(state.slipAngleDeg) / peakSlipDeg)
 
         // Lateral adhesion limit

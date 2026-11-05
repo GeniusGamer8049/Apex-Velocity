@@ -10,9 +10,10 @@ import androidx.room.RoomDatabase
         DriverProfile::class,
         GameStatistics::class,
         Achievements::class,
-        DailyChallenges::class
+        DailyChallenges::class,
+        GlobalLeaderboards::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -23,6 +24,8 @@ abstract class AppDatabase : RoomDatabase() {
     fun achievementDao(): AchievementsDao = achievementsDao()
     abstract fun dailyChallengesDao(): DailyChallengesDao
     fun dailyChallengeDao(): DailyChallengesDao = dailyChallengesDao()
+    abstract fun globalLeaderboardsDao(): GlobalLeaderboardsDao
+    fun globalLeaderboardDao(): GlobalLeaderboardsDao = globalLeaderboardsDao()
 
     companion object {
         @Volatile

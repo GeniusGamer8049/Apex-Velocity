@@ -433,6 +433,16 @@ fun DynamicWeatherOverlay(
                     WeatherStatItem("Traction Level", gripLabel, Icons.Default.Speed, gripColor)
                 }
 
+                // Dynamic Weather Physics adjustments (Braking Distance & Top Speed)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    WeatherStatItem("Top Speed", "${playerState.effectiveTopSpeedKmh.toInt()} km/h", Icons.Default.Speed, ApexCyan)
+                    WeatherStatItem("Est. Braking", String.format(java.util.Locale.US, "%.1fm", playerState.estimatedBrakingDistanceM), Icons.Default.Warning, if (playerState.estimatedBrakingDistanceM > 50f) ApexOrange else TextWhite)
+                    WeatherStatItem("Surface Wetness", "$wetnessPercent%", Icons.Default.WaterDrop, wetnessBarColor)
+                }
+
                 // Tire strategy advice
                 if (tireCompound != null) {
                     Row(

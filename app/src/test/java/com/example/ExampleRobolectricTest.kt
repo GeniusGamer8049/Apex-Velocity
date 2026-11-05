@@ -1700,6 +1700,384 @@ class ExampleRobolectricTest {
         val reClaimResult = repository.claimChallenge(completedTask.id)
         org.junit.Assert.assertNull("Cannot claim already claimed task", reClaimResult)
     }
+
+    @Test
+    fun `test DailyChallengesReminderWorker execution and notification channel creation`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        androidx.work.testing.WorkManagerTestInitHelper.initializeTestWorkManager(context)
+
+        val worker = androidx.work.testing.TestListenableWorkerBuilder<com.example.worker.DailyChallengesReminderWorker>(context).build()
+        val result = worker.doWork()
+        assertEquals(androidx.work.ListenableWorker.Result.success(), result)
+
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        val channel = notificationManager.getNotificationChannel(com.example.worker.DailyChallengesReminderWorker.CHANNEL_ID)
+        assertNotNull("Notification channel must be created", channel)
+        assertEquals("Daily Challenges Reminder", channel.name)
+    }
+
+    @Test
+    fun `test DailyChallengesNotificationScheduler registers WorkManager work requests`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        androidx.work.testing.WorkManagerTestInitHelper.initializeTestWorkManager(context)
+
+        com.example.worker.DailyChallengesNotificationScheduler.scheduleDailyReminder(context, forceUpdate = true)
+        val periodicWorkInfo = androidx.work.WorkManager.getInstance(context)
+            .getWorkInfosForUniqueWork(com.example.worker.DailyChallengesNotificationScheduler.WORK_NAME_PERIODIC)
+            .get()
+        assertNotNull(periodicWorkInfo)
+        assertTrue("Periodic daily reminder work must be enqueued", periodicWorkInfo.isNotEmpty())
+
+        com.example.worker.DailyChallengesNotificationScheduler.triggerImmediateReminderCheck(context)
+        val oneTimeWorkInfo = androidx.work.WorkManager.getInstance(context)
+            .getWorkInfosForUniqueWork(com.example.worker.DailyChallengesNotificationScheduler.WORK_NAME_ONE_TIME)
+            .get()
+        assertNotNull(oneTimeWorkInfo)
+        assertTrue("One-time reminder check work must be enqueued", oneTimeWorkInfo.isNotEmpty())
+    }
+
+    @Test
+    fun `test GlobalLeaderboards entity formatting and flag helper`() {
+        val entry = com.example.data.room.GlobalLeaderboards(
+            id = "test_entry_1",
+            trackId = "monaco_riviera",
+            trackName = "Monaco Riviera",
+            rank = 1,
+            driverName = "Max Apex",
+            countryCode = "NL",
+            vehicleName = "Hyperion GT-R",
+            vehicleCategory = "Apex Prototype",
+            lapTimeMs = 74420L,
+            gapMs = 0L,
+            isPlayer = false,
+            tierName = "WORLD_RECORD"
+        )
+
+        assertEquals("1:14.420", entry.formattedTime)
+        assertEquals("LEADER", entry.formattedGap)
+        assertEquals("🇳🇱", entry.countryFlag)
+
+        val chaser = entry.copy(
+            id = "test_entry_2",
+            rank = 2,
+            lapTimeMs = 74700L,
+            gapMs = 280L,
+            countryCode = "US"
+        )
+        assertEquals("1:14.700", chaser.formattedTime)
+        assertEquals("+0.280s", chaser.formattedGap)
+        assertEquals("🇺🇸", chaser.countryFlag)
+    }
+
+    @Test
+    fun `test DefaultGlobalLeaderboards benchmark roster and all 4 circuits`() {
+        val rankings = com.example.data.room.DefaultGlobalLeaderboards.createDefaultRankings()
+        assertEquals(40, rankings.size) // 4 circuits * 10 entries
+
+        val tracks = com.example.data.room.DefaultGlobalLeaderboards.trackSpecs.map { it.trackId }
+        assertTrue("Contains Monaco Riviera", tracks.contains("monaco_riviera"))
+        assertTrue("Contains Apex Speedway", tracks.contains("apex_speedway"))
+        assertTrue("Contains Neon Tokyo", tracks.contains("neon_tokyo"))
+        assertTrue("Contains Mount Akina", tracks.contains("mount_akina"))
+
+        for (trackId in tracks) {
+            val trackRankings = rankings.filter { it.trackId == trackId }
+            assertEquals(10, trackRankings.size)
+            val wr = trackRankings.first { it.rank == 1 }
+            assertEquals(0L, wr.gapMs)
+            assertEquals("WORLD_RECORD", wr.tierName)
+            assertFalse(wr.isPlayer)
+        }
+    }
+
+    @Test
+    fun `test GlobalLeaderboardsDao queries and database storage`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = com.example.data.room.AppDatabase.getDatabase(context)
+        val dao = db.globalLeaderboardsDao()
+
+        // Clean any existing entries
+        dao.deleteAllLeaderboards()
+        assertEquals(0, dao.getTotalEntryCount())
+
+        // Insert default rankings
+        val defaults = com.example.data.room.DefaultGlobalLeaderboards.createDefaultRankings()
+        dao.insertDefaultEntries(defaults)
+
+        val totalCount = dao.getTotalEntryCount()
+        assertEquals(40, totalCount)
+
+        val monacoCount = dao.getEntryCountForTrack("monaco_riviera")
+        assertEquals(10, monacoCount)
+
+        val top5Monaco = dao.getTopRankingsForTrack("monaco_riviera", limit = 5)
+        assertEquals(5, top5Monaco.size)
+        assertEquals(1, top5Monaco[0].rank)
+        assertEquals(2, top5Monaco[1].rank)
+        assertEquals(3, top5Monaco[2].rank)
+
+        val wr = dao.getWorldRecordForTrack("monaco_riviera")
+        assertNotNull(wr)
+        assertEquals(1, wr!!.rank)
+        assertEquals(74420L, wr.lapTimeMs)
+
+        val player = dao.getPlayerEntryForTrack("monaco_riviera")
+        org.junit.Assert.assertNull("No player entry seeded initially", player)
+    }
+
+    @Test
+    fun `test GlobalLeaderboardsRepository records player lap and dynamically recalculates ranks`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val repository = com.example.data.GlobalLeaderboardsRepository(context)
+        val dao = repository.globalLeaderboardsDao
+
+        // Clean & seed fresh
+        dao.deleteAllLeaderboards()
+        repository.ensureDefaultLeaderboards()
+
+        // 1. Record a player lap time that slots into 2nd place
+        // Monaco base WR is 74420L. Seeded #2 is 74420 + 280 = 74700L.
+        // Let's set player time = 74500L (between WR 74420L and old #2 74700L)
+        val playerEntry = repository.recordPlayerLapTime(
+            trackId = "monaco_riviera",
+            trackName = "Monaco Riviera",
+            lapTimeMs = 74500L,
+            driverName = "Apex Champion",
+            countryCode = "US",
+            vehicleName = "Hyperion GT-R",
+            vehicleCategory = "Apex Prototype"
+        )
+
+        assertNotNull(playerEntry)
+        assertEquals(2, playerEntry.rank)
+        assertTrue(playerEntry.isPlayer)
+        assertEquals(80L, playerEntry.gapMs) // 74500 - 74420 = 80ms gap to WR
+
+        // Check leaderboard for Monaco
+        val updatedMonaco = dao.getLeaderboardForTrack("monaco_riviera")
+        val p = updatedMonaco.first { it.isPlayer }
+        assertEquals(2, p.rank)
+        assertEquals(74500L, p.lapTimeMs)
+
+        // The former #2 driver should now be rank 3
+        val thirdPlace = updatedMonaco.first { it.rank == 3 }
+        assertFalse(thirdPlace.isPlayer)
+        assertEquals(74700L, thirdPlace.lapTimeMs)
+        assertEquals(280L, thirdPlace.gapMs)
+
+        // 2. Record a faster player lap time that sets a NEW WORLD RECORD
+        val newWrEntry = repository.recordPlayerLapTime(
+            trackId = "monaco_riviera",
+            trackName = "Monaco Riviera",
+            lapTimeMs = 73900L, // 520ms faster than former WR (74420L)
+            driverName = "Apex Champion",
+            countryCode = "US",
+            vehicleName = "Hyperion GT-R",
+            vehicleCategory = "Apex Prototype"
+        )
+
+        assertEquals(1, newWrEntry.rank)
+        assertEquals(0L, newWrEntry.gapMs)
+        assertEquals("WORLD_RECORD", newWrEntry.tierName)
+        assertTrue(newWrEntry.isPlayer)
+
+        val monacoAfterWr = dao.getLeaderboardForTrack("monaco_riviera")
+        val newWr = monacoAfterWr.first { it.rank == 1 }
+        assertTrue(newWr.isPlayer)
+        assertEquals(73900L, newWr.lapTimeMs)
+        assertEquals(0L, newWr.gapMs)
+
+        // Former WR holder (74420L) is now rank 2 with gap 74420 - 73900 = 520ms
+        val secondPlace = monacoAfterWr.first { it.rank == 2 }
+        assertFalse(secondPlace.isPlayer)
+        assertEquals(74420L, secondPlace.lapTimeMs)
+        assertEquals(520L, secondPlace.gapMs)
+
+        // Verify world record flow query
+        val wrFlowValue = repository.getWorldRecordForTrackFlow("monaco_riviera").first()
+        assertNotNull(wrFlowValue)
+        assertEquals(1, wrFlowValue!!.rank)
+        assertTrue(wrFlowValue.isPlayer)
+    }
+
+    @Test
+    fun `test DynamicWeatherPhysicsService grip topSpeed and brakingDistance parameters across Sunny Rain Snow`() {
+        val service = com.example.physics.DynamicWeatherPhysicsService()
+
+        // 1. Sunny & Dry Condition
+        service.forceWeather(com.example.physics.RaceWeatherCondition.SUNNY)
+        val sunny = service.physicsState.value
+        assertEquals(1.0f, sunny.gripMultiplier, 0.001f)
+        assertEquals(1.0f, sunny.topSpeedMultiplier, 0.001f)
+        assertEquals(1.0f, sunny.brakingEfficiencyMultiplier, 0.001f)
+        assertEquals(1.0f, sunny.brakingDistanceMultiplier, 0.001f)
+        assertEquals("100%", sunny.formattedGripPct)
+
+        // 2. Rain & Wet Condition
+        service.forceWeather(com.example.physics.RaceWeatherCondition.RAIN)
+        val rain = service.physicsState.value
+        assertEquals(0.70f, rain.gripMultiplier, 0.001f)
+        assertEquals(0.94f, rain.topSpeedMultiplier, 0.001f)
+        assertEquals(0.68f, rain.brakingEfficiencyMultiplier, 0.001f)
+        assertTrue("Rain braking distance multiplier is ~1.47x (47% longer)", rain.brakingDistanceMultiplier > 1.40f)
+        assertEquals("70%", rain.formattedGripPct)
+
+        // 3. Snow & Ice Condition
+        service.forceWeather(com.example.physics.RaceWeatherCondition.SNOW)
+        val snow = service.physicsState.value
+        assertEquals(0.38f, snow.gripMultiplier, 0.001f)
+        assertEquals(0.85f, snow.topSpeedMultiplier, 0.001f)
+        assertEquals(0.40f, snow.brakingEfficiencyMultiplier, 0.001f)
+        assertEquals(2.50f, snow.brakingDistanceMultiplier, 0.001f)
+        assertEquals("38%", snow.formattedGripPct)
+
+        // Comparison assertions: Grip Sunny > Rain > Snow
+        assertTrue("Sunny grip exceeds rain", sunny.gripMultiplier > rain.gripMultiplier)
+        assertTrue("Rain grip exceeds snow", rain.gripMultiplier > snow.gripMultiplier)
+
+        // Top speed Sunny > Rain > Snow
+        assertTrue("Sunny top speed exceeds rain", sunny.topSpeedMultiplier > rain.topSpeedMultiplier)
+        assertTrue("Rain top speed exceeds snow", rain.topSpeedMultiplier > snow.topSpeedMultiplier)
+
+        // Braking distance multiplier: Sunny < Rain < Snow (Snow is ~2.5x longer)
+        assertTrue("Rain stopping distance is longer than sunny", rain.brakingDistanceMultiplier > sunny.brakingDistanceMultiplier)
+        assertTrue("Snow stopping distance is much longer than rain", snow.brakingDistanceMultiplier > rain.brakingDistanceMultiplier)
+    }
+
+    @Test
+    fun `test DynamicWeatherPhysicsService braking distance calculations at various speeds`() {
+        val service = com.example.physics.DynamicWeatherPhysicsService()
+
+        // At 0 km/h, braking distance should be 0
+        val dist0 = service.calculateBrakingDistanceMeters(0f, 1.0f)
+        assertEquals(0f, dist0, 0.001f)
+
+        // At 100 km/h in Sunny (efficiency = 1.0)
+        val sunnyDist100 = service.calculateBrakingDistanceMeters(100f, 1.0f, baseBrakePower = 1.0f)
+        assertTrue("Sunny stopping distance at 100 km/h should be between 25m and 45m", sunnyDist100 in 25f..45f)
+
+        // At 100 km/h in Rain (efficiency = 0.68)
+        val rainDist100 = service.calculateBrakingDistanceMeters(100f, 0.68f, baseBrakePower = 1.0f)
+        assertTrue("Rain stopping distance at 100 km/h must exceed sunny", rainDist100 > sunnyDist100)
+        assertEquals(sunnyDist100 / 0.68f, rainDist100, 0.5f)
+
+        // At 100 km/h in Snow (efficiency = 0.40)
+        val snowDist100 = service.calculateBrakingDistanceMeters(100f, 0.40f, baseBrakePower = 1.0f)
+        assertTrue("Snow stopping distance at 100 km/h must exceed rain", snowDist100 > rainDist100)
+        assertEquals(sunnyDist100 / 0.40f, snowDist100, 1.0f)
+
+        // Verify quadratic velocity scaling: 100 km/h distance should be roughly 4x of 50 km/h
+        val sunnyDist50 = service.calculateBrakingDistanceMeters(50f, 1.0f, baseBrakePower = 1.0f)
+        val ratio = sunnyDist100 / sunnyDist50
+        assertEquals(4.0f, ratio, 0.05f)
+    }
+
+    @Test
+    fun `test DynamicWeatherPhysicsService randomized weather generation and race update transitions`() {
+        val deterministicRandom = java.util.Random(12345)
+        val kotlinRandom = kotlin.random.Random(12345)
+        val service = com.example.physics.DynamicWeatherPhysicsService(kotlinRandom)
+
+        service.reset(com.example.physics.RaceWeatherCondition.SUNNY, enableRandomization = true)
+        assertTrue(service.isRandomWeatherEnabled)
+
+        // Randomize weather multiple times and verify all outcomes belong to valid set
+        val validConditions = com.example.physics.RaceWeatherCondition.values().toSet()
+        for (i in 0 until 15) {
+            val randomized = service.randomizeWeather(excludeCurrent = false)
+            assertTrue("Must produce valid condition", validConditions.contains(randomized))
+        }
+
+        // Trigger manual randomized weather shift
+        val newCondition = service.triggerRandomWeatherChange()
+        assertNotNull(newCondition)
+        val stateAfterRandom = service.physicsState.value
+        assertEquals(newCondition, stateAfterRandom.weather)
+        assertNotNull(stateAfterRandom.alertMessage)
+
+        // Test dynamic update over time with a vehicle
+        val starterVehicle = com.example.model.VehicleRegistry.createDefaultVehicles().first()
+        val updateResult = service.update(
+            raceElapsedSec = 10f,
+            dt = 0.016f,
+            vehicle = starterVehicle,
+            currentSpeedKmh = 120f
+        )
+        assertNotNull(updateResult)
+        assertEquals(120f, updateResult.currentSpeedKmh, 0.01f)
+        assertTrue(updateResult.effectiveTopSpeedKmh > 100f)
+        assertTrue(updateResult.brakingDistanceAtCurrentSpeed > 0f)
+    }
+
+    @Test
+    fun `test PhysicsEngine incorporates dynamic weather adjustment into car physics state`() {
+        val physicsEngine = com.example.physics.PhysicsEngine()
+        val track = com.example.model.TrackRegistry.allTracks.first()
+        val vehicle = com.example.model.VehicleRegistry.createDefaultVehicles().first()
+        val particleSystem = com.example.physics.ParticleSystem()
+
+        val stateSunny = com.example.physics.CarPhysicsState(x = 100f, y = 100f, vx = 25f, vy = 0f)
+        val sunnyAdj = com.example.physics.AdjustedVehiclePhysics(
+            weather = com.example.physics.RaceWeatherCondition.SUNNY,
+            gripMultiplier = 1.0f,
+            brakingEfficiencyMultiplier = 1.0f,
+            topSpeedMultiplier = 1.0f,
+            effectiveTopSpeedKmh = 240f,
+            brakingDistanceAtCurrentSpeed = 35f
+        )
+
+        physicsEngine.updatePlayer(
+            state = stateSunny,
+            vehicle = vehicle,
+            track = track,
+            currentWeather = com.example.model.WeatherType.SUNNY_CLEAR,
+            trackWetness = 0.0f,
+            throttleInput = 1.0f,
+            brakeInput = 0f,
+            steerInput = 0f,
+            handbrakeInput = false,
+            boostInput = false,
+            particleSystem = particleSystem,
+            dt = 0.016f,
+            weatherAdjustment = sunnyAdj
+        )
+
+        val gripInSunny = stateSunny.effectiveTireGrip
+        assertEquals(240f, stateSunny.effectiveTopSpeedKmh, 0.1f)
+        assertEquals(35f, stateSunny.estimatedBrakingDistanceM, 0.1f)
+
+        // Compare with Snow Weather Adjustment
+        val stateSnow = com.example.physics.CarPhysicsState(x = 100f, y = 100f, vx = 25f, vy = 0f)
+        val snowAdj = com.example.physics.AdjustedVehiclePhysics(
+            weather = com.example.physics.RaceWeatherCondition.SNOW,
+            gripMultiplier = 0.38f,
+            brakingEfficiencyMultiplier = 0.40f,
+            topSpeedMultiplier = 0.85f,
+            effectiveTopSpeedKmh = 204f,
+            brakingDistanceAtCurrentSpeed = 90f
+        )
+
+        physicsEngine.updatePlayer(
+            state = stateSnow,
+            vehicle = vehicle,
+            track = track,
+            currentWeather = com.example.model.WeatherType.FREEZING_ICE,
+            trackWetness = 0.95f,
+            throttleInput = 1.0f,
+            brakeInput = 0f,
+            steerInput = 0f,
+            handbrakeInput = false,
+            boostInput = false,
+            particleSystem = particleSystem,
+            dt = 0.016f,
+            weatherAdjustment = snowAdj
+        )
+
+        val gripInSnow = stateSnow.effectiveTireGrip
+        assertTrue("Grip in sunny should significantly exceed snow", gripInSunny > gripInSnow * 2f)
+        assertEquals(204f, stateSnow.effectiveTopSpeedKmh, 0.1f)
+        assertEquals(90f, stateSnow.estimatedBrakingDistanceM, 0.1f)
+    }
 }
 
 

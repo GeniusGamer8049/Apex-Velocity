@@ -10,6 +10,8 @@ import com.example.data.room.GameStatistics
 import com.example.data.room.GameStatisticsDao
 import com.example.data.room.DailyChallenges
 import com.example.data.room.DailyChallengesDao
+import com.example.data.room.GlobalLeaderboards
+import com.example.data.room.GlobalLeaderboardsDao
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -18,13 +20,14 @@ import kotlinx.coroutines.withContext
 /**
  * Data Repository class that abstracts Room database operations from the UI layer,
  * providing a clean, thread-safe, reactive API for accessing and persisting
- * [DriverProfile], [GameStatistics], [Achievements], and [DailyChallenges] data.
+ * [DriverProfile], [GameStatistics], [Achievements], [DailyChallenges], and [GlobalLeaderboards] data.
  */
 class DataRepository(
     val driverProfileDao: DriverProfileDao,
     val gameStatisticsDao: GameStatisticsDao,
     val achievementsDao: AchievementsDao? = null,
     val dailyChallengesDao: DailyChallengesDao? = null,
+    val globalLeaderboardsDao: GlobalLeaderboardsDao? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) {
 
@@ -32,13 +35,15 @@ class DataRepository(
         driverProfileDao = AppDatabase.getDatabase(context).driverProfileDao(),
         gameStatisticsDao = AppDatabase.getDatabase(context).gameStatisticsDao(),
         achievementsDao = AppDatabase.getDatabase(context).achievementsDao(),
-        dailyChallengesDao = AppDatabase.getDatabase(context).dailyChallengesDao()
+        dailyChallengesDao = AppDatabase.getDatabase(context).dailyChallengesDao(),
+        globalLeaderboardsDao = AppDatabase.getDatabase(context).globalLeaderboardsDao()
     )
 
     val driverProfileRepository = DriverProfileRepository(driverProfileDao, ioDispatcher)
     val gameStatisticsRepository = GameStatisticsRepository(gameStatisticsDao, ioDispatcher)
     val achievementsRepository = achievementsDao?.let { AchievementsRepository(it, ioDispatcher) }
     val dailyChallengesRepository = dailyChallengesDao?.let { DailyChallengesRepository(it, ioDispatcher) }
+    val globalLeaderboardsRepository = globalLeaderboardsDao?.let { GlobalLeaderboardsRepository(it, ioDispatcher) }
 
     // ========================================================================
     // Driver Profile APIs

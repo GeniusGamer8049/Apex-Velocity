@@ -26,6 +26,9 @@ import com.example.model.WeatherType
 import com.example.physics.AiOpponentManager
 import com.example.physics.AiRacer
 import com.example.physics.CarPhysicsState
+import com.example.physics.DynamicWeatherPhysicsService
+import com.example.physics.RaceWeatherCondition
+import com.example.physics.AdjustedVehiclePhysics
 import com.example.physics.ParticleSystem
 import com.example.physics.PhysicsEngine
 import com.example.model.Achievement
@@ -66,6 +69,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val gameStatisticsRepository: com.example.data.GameStatisticsRepository = repository.gameStatisticsRepository
     val achievementsRepository: com.example.data.AchievementsRepository = repository.achievementsRepository
     val dailyChallengesRepository: com.example.data.DailyChallengesRepository = repository.dailyChallengesRepository
+    val globalLeaderboardsRepository: com.example.data.GlobalLeaderboardsRepository = repository.globalLeaderboardsRepository
     val profile: StateFlow<PlayerProfile> = repository.profile
     val dbDriverProfile: Flow<DriverProfile?> = driverProfileRepository.driverProfileFlow
     val recentGameStatistics: Flow<List<GameStatistics>> = gameStatisticsRepository.recentGameStatisticsFlow
@@ -77,6 +81,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun getTopRaceTimesForTrack(trackId: String): Flow<List<GameStatistics>> =
         gameStatisticsRepository.getTopRaceTimesForTrackFlow(trackId)
+
+    fun getGlobalLeaderboardForTrack(trackId: String): Flow<List<com.example.data.room.GlobalLeaderboards>> =
+        globalLeaderboardsRepository.getLeaderboardForTrackFlow(trackId)
+
+    fun getTopGlobalRankingsForTrack(trackId: String, limit: Int = 5): Flow<List<com.example.data.room.GlobalLeaderboards>> =
+        globalLeaderboardsRepository.getTopRankingsForTrackFlow(trackId, limit)
+
+    fun getPlayerGlobalRanking(trackId: String): Flow<com.example.data.room.GlobalLeaderboards?> =
+        globalLeaderboardsRepository.getPlayerEntryForTrackFlow(trackId)
+
+    fun getWorldRecordForTrack(trackId: String): Flow<com.example.data.room.GlobalLeaderboards?> =
+        globalLeaderboardsRepository.getWorldRecordForTrackFlow(trackId)
 
     fun claimRoomDailyChallenge(challengeId: String) = repository.claimRoomDailyChallenge(challengeId)
 
@@ -104,6 +120,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val ghostFrame = MutableStateFlow<GhostFrame?>(null)
     val activeGhostLap = MutableStateFlow<GhostLap?>(null)
     val weatherState = MutableStateFlow(DynamicWeatherState())
+    val dynamicWeatherPhysicsService: DynamicWeatherPhysicsService = DynamicWeatherPhysicsService.getInstance()
+    val weatherPhysicsState: StateFlow<AdjustedVehiclePhysics> = dynamicWeatherPhysicsService.physicsState
     val isPaused = MutableStateFlow(false)
     val raceResults = MutableStateFlow<RaceResults?>(null)
     val postRaceResult = MutableStateFlow<PostRaceResult?>(null)
@@ -249,9 +267,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             aiRacers.value = emptyList()
         }
 
-        // Initialize Dynamic Weather
+        // Initialize Dynamic Weather & Physics Service
         val initialCondition = com.example.model.WeatherCondition.fromWeatherType(initialWeather)
+        val initialRaceWeather = RaceWeatherCondition.fromWeatherType(initialWeather)
         com.example.model.WeatherManager.setCondition(initialCondition)
+        dynamicWeatherPhysicsService.reset(initialRaceWeather, enableRandomization = isDynamic)
 
         weatherState.value = DynamicWeatherState(
             currentWeather = initialWeather,
@@ -272,7 +292,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (!isPaused.value && !isCountdownActive.value && raceResults.value == null && postRaceResult.value == null) {
                     val pState = playerState.value
                     val vehicle = getCurrentVehicle()
-                    val wState = weatherState.value
 
                     raceElapsedSec += dt
                     raceDurationMillis.value = (raceElapsedSec * 1000f).toLong()
@@ -280,18 +299,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         maxSpeedReached = pState.speedKmh
                     }
 
-                    // 1. Dynamic Weather Progression
-                    if (isDynamic && activeTrack.dynamicWeatherProgression.isNotEmpty()) {
-                        updateDynamicWeather(raceElapsedSec, dt)
+                    // 1. Dynamic Weather Progression & Randomized Physics Update
+                    val dynamicPhysics = dynamicWeatherPhysicsService.update(
+                        raceElapsedSec = raceElapsedSec,
+                        dt = dt,
+                        vehicle = vehicle,
+                        currentSpeedKmh = pState.speedKmh
+                    )
+
+                    // Keep weatherState in sync with dynamic physics weather
+                    val currW = weatherState.value
+                    if (currW.currentWeather != dynamicPhysics.weather.associatedWeatherType ||
+                        kotlin.math.abs(currW.trackWetness - dynamicPhysics.trackWetness) > 0.03f ||
+                        dynamicPhysics.alertMessage != currW.alertMessage) {
+                        weatherState.value = currW.copy(
+                            currentWeather = dynamicPhysics.weather.associatedWeatherType,
+                            trackWetness = dynamicPhysics.trackWetness,
+                            alertMessage = dynamicPhysics.alertMessage,
+                            forecastWeather = dynamicPhysics.forecastWeather?.associatedWeatherType ?: dynamicPhysics.weather.associatedWeatherType,
+                            secondsToTransition = dynamicPhysics.secondsToNextRandomization
+                        )
                     }
 
                     // 2. Physics Engine Update for Player
+                    val wState = weatherState.value
                     physicsEngine.updatePlayer(
                         state = pState,
                         vehicle = vehicle,
                         track = activeTrack,
                         currentWeather = wState.currentWeather,
-                        trackWetness = wState.trackWetness,
+                        trackWetness = dynamicPhysics.trackWetness,
                         throttleInput = throttleInput,
                         brakeInput = brakeInput,
                         steerInput = steerInput,
@@ -304,7 +341,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             if (impact > 0.35f) {
                                 cleanLap = false
                             }
-                        }
+                        },
+                        weatherAdjustment = dynamicPhysics
                     )
 
                     // 3. AI Racers Update & Bump Collision Detection
@@ -843,12 +881,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setWeatherCondition(condition: com.example.model.WeatherCondition) {
         com.example.model.WeatherManager.setCondition(condition)
+        val raceCond = RaceWeatherCondition.fromWeatherCondition(condition)
+        dynamicWeatherPhysicsService.forceWeather(raceCond)
         val targetWetness = condition.targetTrackWetness
         weatherState.value = weatherState.value.copy(
             currentWeather = condition.associatedWeatherType,
             trackWetness = targetWetness,
             alertMessage = "CONDITIONS: ${condition.displayName.uppercase()}"
         )
+    }
+
+    fun triggerRandomRaceWeather(): RaceWeatherCondition {
+        val newCond = dynamicWeatherPhysicsService.triggerRandomWeatherChange()
+        com.example.model.WeatherManager.setCondition(newCond.associatedCondition)
+        weatherState.value = weatherState.value.copy(
+            currentWeather = newCond.associatedWeatherType,
+            trackWetness = newCond.targetTrackWetness,
+            alertMessage = dynamicWeatherPhysicsService.physicsState.value.alertMessage
+        )
+        return newCond
+    }
+
+    fun toggleAutoRandomWeather(enabled: Boolean) {
+        dynamicWeatherPhysicsService.setRandomWeatherEnabled(enabled)
     }
 
     fun cycleWeatherCondition(): com.example.model.WeatherCondition {

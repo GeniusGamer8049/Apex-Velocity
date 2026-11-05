@@ -97,7 +97,8 @@ fun RaceHud(
     isRaceRunning: Boolean = true,
     controlsEnabled: Boolean = true,
     onToggleRaceTimer: () -> Unit = onPauseClick,
-    onWeatherSelected: (WeatherCondition) -> Unit = {}
+    onWeatherSelected: (WeatherCondition) -> Unit = {},
+    onRandomizeWeather: (() -> Unit)? = null
 ) {
     var showTelemetry by remember { mutableStateOf(false) }
 
@@ -297,10 +298,11 @@ fun RaceHud(
                 tireCompound = tireCompound
             )
 
-            // Weather Manager Live Control Overlay (Toggle Clear, Rain, Snow)
+            // Weather Manager Live Control Overlay (Toggle Clear, Rain, Snow + Randomize)
             WeatherControlOverlay(
                 activeCondition = WeatherCondition.fromWeatherType(weatherState.currentWeather),
                 onWeatherSelected = onWeatherSelected,
+                onRandomizeWeather = onRandomizeWeather,
                 modifier = Modifier.fillMaxWidth()
             )
         }

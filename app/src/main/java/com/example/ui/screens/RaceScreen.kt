@@ -110,7 +110,8 @@ fun RaceScreen(
             onHandbrakeChange = { viewModel.handbrakeInput = it },
             onBoostChange = { viewModel.boostInput = it },
             onPauseClick = { viewModel.pauseRace() },
-            onWeatherSelected = { viewModel.setWeatherCondition(it) }
+            onWeatherSelected = { viewModel.setWeatherCondition(it) },
+            onRandomizeWeather = { viewModel.triggerRandomRaceWeather() }
         )
 
         // 3. Pre-Race 3-2-1 Countdown Sequence

@@ -64,6 +64,7 @@ import com.example.model.Vehicle
 import com.example.model.VehicleUpgrades
 import com.example.ui.components.DailyChallengesCard
 import com.example.ui.components.DailyChallengesSection
+import com.example.ui.components.GlobalLeaderboardsMenuSection
 import com.example.ui.theme.ApexCyan
 import com.example.ui.theme.ApexGold
 import com.example.ui.theme.ApexGreen
@@ -92,7 +93,9 @@ fun GarageScreen(
     onClaimChallenge: (String) -> Unit = {},
     onClaimAllBonus: () -> Unit = {},
     onOpenAchievements: () -> Unit = {},
-    onOpenDriverProfile: () -> Unit = {}
+    onOpenDriverProfile: () -> Unit = {},
+    onTriggerNotification: (() -> Unit)? = null,
+    onOpenLeaderboard: (String) -> Unit = {}
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val currentVehicle = profile.vehicles.find { it.id == profile.selectedVehicleId } ?: profile.vehicles.first()
@@ -336,6 +339,7 @@ fun GarageScreen(
                 DailyChallengesSection(
                     challenges = dailyChallenges,
                     onClaimChallenge = onClaimChallenge,
+                    onTriggerNotification = onTriggerNotification,
                     modifier = Modifier.fillMaxWidth()
                 )
             } else {
@@ -347,6 +351,14 @@ fun GarageScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
             }
+        }
+
+        // Global Circuit Rankings Room Component
+        item {
+            GlobalLeaderboardsMenuSection(
+                onViewFullLeaderboard = onOpenLeaderboard,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
         // Section Tabs: Performance Upgrades vs Customization Paint

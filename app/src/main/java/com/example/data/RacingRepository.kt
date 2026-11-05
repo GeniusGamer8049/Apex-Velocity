@@ -22,15 +22,19 @@ import org.json.JSONObject
 
 import com.example.data.room.AppDatabase
 import com.example.data.room.DriverProfileDao
+import com.example.data.room.GameStatistics
 import com.example.data.room.GameStatisticsDao
 import com.example.data.room.AchievementsDao
 import com.example.data.room.Achievements
 import com.example.data.room.DriverProfile
-import com.example.data.room.GameStatistics
 import com.example.data.room.DailyChallengesDao
 import com.example.data.room.DailyChallenges
 import com.example.data.room.DailyChallengesGenerator
+import com.example.data.room.GlobalLeaderboardsDao
+import com.example.data.room.GlobalLeaderboards
 import com.example.data.DailyChallengesRepository
+import com.example.data.GlobalLeaderboardsRepository
+import com.example.model.TrackRegistry
 import com.example.model.Achievement
 import com.example.model.AchievementRegistry
 import com.example.model.ChallengeType
@@ -87,11 +91,19 @@ class RacingRepository(private val context: Context) {
     val gameStatisticsDao: GameStatisticsDao = appDb.gameStatisticsDao()
     val achievementsDao: AchievementsDao = appDb.achievementsDao()
     val dailyChallengesDao: DailyChallengesDao = appDb.dailyChallengesDao()
-    val dataRepository: DataRepository = DataRepository(driverProfileDao, gameStatisticsDao, achievementsDao, dailyChallengesDao)
+    val globalLeaderboardsDao: GlobalLeaderboardsDao = appDb.globalLeaderboardsDao()
+    val dataRepository: DataRepository = DataRepository(
+        driverProfileDao,
+        gameStatisticsDao,
+        achievementsDao,
+        dailyChallengesDao,
+        globalLeaderboardsDao
+    )
     val driverProfileRepository: DriverProfileRepository = dataRepository.driverProfileRepository
     val gameStatisticsRepository: GameStatisticsRepository = dataRepository.gameStatisticsRepository
     val achievementsRepository: AchievementsRepository = AchievementsRepository(achievementsDao)
     val dailyChallengesRepository: DailyChallengesRepository = DailyChallengesRepository(dailyChallengesDao)
+    val globalLeaderboardsRepository: GlobalLeaderboardsRepository = GlobalLeaderboardsRepository(globalLeaderboardsDao)
     private val repoScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val _profile = MutableStateFlow(loadProfile())
@@ -107,6 +119,9 @@ class RacingRepository(private val context: Context) {
             } catch (ignored: Exception) {}
             try {
                 dailyChallengesRepository.ensureTodayChallenges()
+            } catch (ignored: Exception) {}
+            try {
+                globalLeaderboardsRepository.ensureDefaultLeaderboards()
             } catch (ignored: Exception) {}
         }
     }
@@ -536,6 +551,21 @@ class RacingRepository(private val context: Context) {
             if (ghostLap != null) {
                 ghostLapsCache[trackId] = ghostLap
                 saveGhostLap(trackId, ghostLap)
+            }
+            repoScope.launch {
+                try {
+                    val track = TrackRegistry.getTrackById(trackId)
+                    val vehicleCat = curr.vehicles.find { it.name == vehicleName }?.category ?: "Sport Compact"
+                    globalLeaderboardsRepository.recordPlayerLapTime(
+                        trackId = trackId,
+                        trackName = track.name,
+                        lapTimeMs = lapTimeMs,
+                        driverName = curr.driverName,
+                        countryCode = curr.driverCountry,
+                        vehicleName = vehicleName,
+                        vehicleCategory = vehicleCat
+                    )
+                } catch (ignored: Exception) {}
             }
         }
     }

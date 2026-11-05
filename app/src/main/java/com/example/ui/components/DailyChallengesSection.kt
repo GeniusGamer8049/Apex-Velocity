@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
@@ -26,6 +27,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -66,7 +68,8 @@ import java.util.Locale
 fun DailyChallengesSection(
     challenges: List<DailyChallenges>,
     onClaimChallenge: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onTriggerNotification: (() -> Unit)? = null
 ) {
     var currentTimeMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
@@ -168,25 +171,49 @@ fun DailyChallengesSection(
                     }
                 }
 
-                // Expiry Countdown Timer
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.testTag("challenges_countdown_timer")
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Schedule,
-                        contentDescription = "Timer",
-                        tint = ApexCyan,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        text = countdownText,
-                        color = ApexCyan,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
+                    // Expiry Countdown Timer
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.testTag("challenges_countdown_timer")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Schedule,
+                            contentDescription = "Timer",
+                            tint = ApexCyan,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = countdownText,
+                            color = ApexCyan,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    if (onTriggerNotification != null) {
+                        IconButton(
+                            onClick = onTriggerNotification,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(DarkSurface)
+                                .border(1.dp, ApexGold.copy(alpha = 0.5f), CircleShape)
+                                .testTag("trigger_notification_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.NotificationsActive,
+                                contentDescription = "Daily Reminder",
+                                tint = ApexGold,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
                 }
             }
 

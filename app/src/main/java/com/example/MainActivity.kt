@@ -23,7 +23,12 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,10 +37,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import com.example.worker.DailyChallengesNotificationScheduler
 import com.example.ui.AppScreen
 import com.example.ui.MainViewModel
 import com.example.ui.components.BadgeUnlockBanner
@@ -82,6 +90,29 @@ fun RacingApp(viewModel: MainViewModel) {
     val latestUnlockedBadges by viewModel.latestUnlockedBadges.collectAsState()
     var showAchievementsDialog by remember { mutableStateOf(false) }
     var showDriverProfileDialog by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            DailyChallengesNotificationScheduler.scheduleDailyReminder(context)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val hasPermission = ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!hasPermission) {
+                notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+        DailyChallengesNotificationScheduler.scheduleDailyReminder(context)
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         when (currentScreen) {
@@ -221,7 +252,12 @@ fun RacingApp(viewModel: MainViewModel) {
                                     onClaimChallenge = { viewModel.claimRoomDailyChallenge(it) },
                                     onClaimAllBonus = { viewModel.claimAllDailyBonus() },
                                     onOpenAchievements = { showAchievementsDialog = true },
-                                    onOpenDriverProfile = { viewModel.navigateTo(AppScreen.DRIVER_PROFILE) }
+                                    onOpenDriverProfile = { viewModel.navigateTo(AppScreen.DRIVER_PROFILE) },
+                                    onTriggerNotification = { DailyChallengesNotificationScheduler.triggerImmediateReminderCheck(context) },
+                                    onOpenLeaderboard = { trackId ->
+                                        viewModel.selectLeaderboardTrack(trackId)
+                                        viewModel.navigateTo(AppScreen.LEADERBOARD)
+                                    }
                                 )
                             }
 
