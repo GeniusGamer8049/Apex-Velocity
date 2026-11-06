@@ -321,22 +321,29 @@ fun RaceHud(
                     .border(1.dp, SurfaceBorder, RoundedCornerShape(12.dp))
                     .padding(12.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("TELEMETRY", color = ApexCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text("Speed: ${playerState.speedKmh.toInt()} km/h", color = TextWhite, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                    Text("RPM: ${playerState.rpm.toInt()}", color = TextWhite, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                    Text(String.format("Lateral G: %.2f G", playerState.lateralG), color = if (playerState.lateralG > 1.2f) ApexRed else TextWhite, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                    Text(String.format("Slip Angle: %.1f°", playerState.slipAngleDeg), color = if (playerState.isDrifting) ApexOrange else TextWhite, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                    Text(String.format("Tire Grip: %.0f%%", playerState.effectiveTireGrip * 100f), color = if (playerState.effectiveTireGrip < 0.6f) ApexRed else ApexGreen, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("PHYSICS INTEGRATION & TELEMETRY", color = ApexCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Speed: ${playerState.speedKmh.toInt()} km/h | RPM: ${playerState.rpm.toInt()}", color = TextWhite, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    Text(String.format("Velocity: Long %.1f m/s | Lat %.1f m/s", playerState.localVLong, playerState.localVLat), color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    Text(String.format("Friction: Drag %.0fN | Rolling %.0fN (Total %.0fN)", playerState.frictionDragForceN, playerState.frictionRollingResistanceN, playerState.frictionTotalOpposingN), color = ApexGold, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                    Text(String.format("Tire Grip: %.0f%% (F: %.0f%% | R: %.0f%%)", playerState.effectiveTireGrip * 100f, playerState.frontTireGripPct * 100f, playerState.rearTireGripPct * 100f), color = if (playerState.effectiveTireGrip < 0.6f) ApexRed else ApexGreen, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    Text(String.format("Slip: Angle %.1f° | Ratio %+.1f%% | Circle %.0f%%", playerState.slipAngleDeg, playerState.tireSlipRatio * 100f, playerState.frictionCircleUtilizationPct), color = if (playerState.isDrifting) ApexOrange else TextWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                    Text(String.format("G-Forces: Lat %.2fG | Long %+.2fG", playerState.lateralG, playerState.longitudinalG), color = if (playerState.lateralG > 1.2f) ApexRed else TextWhite, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                     Text(
                         text = "Tires: FL:${playerState.tireTempFL.toInt()}° FR:${playerState.tireTempFR.toInt()}° RL:${playerState.tireTempRL.toInt()}° RR:${playerState.tireTempRR.toInt()}°C",
                         color = if (playerState.tireTempFL > 110f || playerState.tireTempFR > 110f) ApexOrange else ApexGreen,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace
                     )
-                    Text("Downforce: ${playerState.downforceN.toInt()} N", color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    Text("Downforce: ${playerState.downforceN.toInt()} N | Brake Dist: ${playerState.estimatedBrakingDistanceM.toInt()}m", color = TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                    if (playerState.isWheelSpinning) {
+                        Text("⚠️ TRACTION: WHEELSPIN DETECTED", color = ApexOrange, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                    if (playerState.isWheelLockup) {
+                        Text("⚠️ BRAKING: WHEEL LOCKUP DETECTED", color = ApexRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
                     if (playerState.driftScore > 0) {
-                        Text("Drift Points: ${playerState.driftScore}", color = ApexGold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Drift Points: ${playerState.driftScore}", color = ApexGold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

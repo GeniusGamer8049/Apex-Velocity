@@ -2078,6 +2078,388 @@ class ExampleRobolectricTest {
         assertEquals(204f, stateSnow.effectiveTopSpeedKmh, 0.1f)
         assertEquals(90f, stateSnow.estimatedBrakingDistanceM, 0.1f)
     }
+
+    @Test
+    fun `test ReplayStorage entity telemetry coordinates serialization and GhostLap conversion`() {
+        val frames = listOf(
+            com.example.model.GhostFrame(timeMs = 0L, x = 100f, y = 200f, heading = 45f, speedKmh = 120f, isBraking = false),
+            com.example.model.GhostFrame(timeMs = 500L, x = 140f, y = 240f, heading = 60f, speedKmh = 140f, isBraking = false),
+            com.example.model.GhostFrame(timeMs = 1000L, x = 180f, y = 260f, heading = 75f, speedKmh = 95f, isBraking = true)
+        )
+
+        val ghostLap = com.example.model.GhostLap(
+            trackId = "monaco_riviera",
+            carName = "Apex GT-86 Coupe",
+            lapTimeMs = 54250L,
+            frames = frames
+        )
+
+        val replay = com.example.data.room.ReplayStorage.fromGhostLap(
+            ghostLap = ghostLap,
+            trackName = "Monaco Riviera Grand Prix",
+            vehicleId = "apex_gt86",
+            weatherType = "SUNNY_CLEAR",
+            cleanLap = true
+        )
+
+        assertEquals("monaco_riviera", replay.trackId)
+        assertEquals("Monaco Riviera Grand Prix", replay.trackName)
+        assertEquals("Apex GT-86 Coupe", replay.vehicleName)
+        assertEquals(54250L, replay.lapTimeMs)
+        assertEquals("0:54.250", replay.formattedLapTime)
+        assertEquals(3, replay.frameCount)
+        assertTrue("Max speed should be 140 km/h", replay.maxSpeedKmh >= 140f)
+
+        // Deserialization check
+        val deserializedFrames = replay.getGhostFrames()
+        assertEquals(3, deserializedFrames.size)
+        assertEquals(0L, deserializedFrames[0].timeMs)
+        assertEquals(100f, deserializedFrames[0].x, 0.1f)
+        assertEquals(200f, deserializedFrames[0].y, 0.1f)
+        assertEquals(45f, deserializedFrames[0].heading, 0.1f)
+        assertFalse(deserializedFrames[0].isBraking)
+
+        // Braking frame check
+        assertEquals(1000L, deserializedFrames[2].timeMs)
+        assertTrue(deserializedFrames[2].isBraking)
+
+        // GhostLap conversion and interpolation check
+        val convertedGhostLap = replay.toGhostLap()
+        assertEquals(54250L, convertedGhostLap.lapTimeMs)
+        val sampledFrame = convertedGhostLap.sampleAt(250L)
+        assertNotNull(sampledFrame)
+        assertTrue(sampledFrame!!.x in 100f..140f)
+        assertTrue(sampledFrame.y in 200f..240f)
+    }
+
+    @Test
+    fun `test ReplayStorage default benchmarks generate valid coordinates for all tracks`() {
+        val defaults = com.example.data.room.ReplayStorage.createDefaultReplays()
+        assertTrue("At least 4 track replays created", defaults.size >= 4)
+
+        val trackIds = defaults.map { it.trackId }.toSet()
+        assertTrue(trackIds.contains("monaco_riviera"))
+        assertTrue(trackIds.contains("apex_speedway"))
+        assertTrue(trackIds.contains("neon_tokyo"))
+        assertTrue(trackIds.contains("mount_akina"))
+
+        for (replay in defaults) {
+            assertTrue("Lap time must be positive", replay.lapTimeMs > 0L)
+            assertTrue("Replay must contain coordinates frames", replay.frameCount > 50)
+            val frames = replay.getGhostFrames()
+            assertEquals(replay.frameCount, frames.size)
+            assertTrue("Frames must start at 0ms", frames.first().timeMs == 0L)
+            assertTrue("Frames must end near lapTimeMs", frames.last().timeMs > 0L)
+        }
+    }
+
+    @Test
+    fun `test ReplayStorageDao database CRUD operations`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = com.example.data.room.AppDatabase.getDatabase(context)
+        val dao = db.replayStorageDao()
+
+        // Clean table
+        dao.clearAllReplays()
+        assertEquals(0, dao.getReplayCount())
+
+        // Insert benchmark replays
+        val defaults = com.example.data.room.ReplayStorage.createDefaultReplays()
+        dao.insertDefaultReplays(defaults)
+        val count = dao.getReplayCount()
+        assertEquals(defaults.size, count)
+
+        // Query by track
+        val monacoReplays = dao.getReplaysForTrack("monaco_riviera")
+        assertTrue("Monaco replay exists", monacoReplays.isNotEmpty())
+
+        val bestMonaco = dao.getBestReplayForTrack("monaco_riviera")
+        assertNotNull(bestMonaco)
+        assertEquals("monaco_riviera", bestMonaco!!.trackId)
+
+        // Insert new faster player replay
+        val fasterFrames = listOf(
+            com.example.model.GhostFrame(0L, 500f, 600f, 0f, 160f),
+            com.example.model.GhostFrame(50000L, 500f, 600f, 0f, 160f)
+        )
+        val fasterReplay = com.example.data.room.ReplayStorage(
+            id = "test_player_monaco_fast",
+            trackId = "monaco_riviera",
+            trackName = "Monaco Riviera Grand Prix",
+            vehicleId = "hyperion_gtr",
+            vehicleName = "Hyperion GT-R",
+            lapTimeMs = 49999L, // Faster than default benchmark
+            maxSpeedKmh = 230f,
+            avgSpeedKmh = 180f,
+            frameCount = 2,
+            telemetryDataJson = com.example.data.room.ReplayStorage.serializeFrames(fasterFrames)
+        )
+        dao.insertReplay(fasterReplay)
+
+        val newBest = dao.getBestReplayForTrack("monaco_riviera")
+        assertNotNull(newBest)
+        assertEquals("test_player_monaco_fast", newBest!!.id)
+        assertEquals(49999L, newBest.lapTimeMs)
+
+        // Delete single replay
+        dao.deleteReplayById("test_player_monaco_fast")
+        val afterDelete = dao.getReplayById("test_player_monaco_fast")
+        org.junit.Assert.assertNull(afterDelete)
+    }
+
+    @Test
+    fun `test ReplayStorageRepository save and fetch operations`() = kotlinx.coroutines.runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val repository = com.example.data.ReplayStorageRepository(context)
+
+        // Ensure default replays
+        repository.clearAllReplays()
+        repository.ensureDefaultReplays()
+
+        val count = repository.getReplayCount()
+        assertTrue("Repository seeded default replays", count >= 4)
+
+        val bestApex = repository.getBestReplayForTrack("apex_speedway")
+        assertNotNull(bestApex)
+        assertEquals("apex_speedway", bestApex!!.trackId)
+        assertTrue(bestApex.getGhostFrames().isNotEmpty())
+
+        // Save a new ghost lap replay
+        val testFrames = listOf(
+            com.example.model.GhostFrame(0L, 800f, 500f, 90f, 200f),
+            com.example.model.GhostFrame(42000L, 800f, 500f, 90f, 200f)
+        )
+        val ghostLap = com.example.model.GhostLap(
+            trackId = "apex_speedway",
+            carName = "Apex GT-86 Coupe",
+            lapTimeMs = 42000L,
+            frames = testFrames
+        )
+
+        val saved = repository.saveGhostLapReplay(
+            ghostLap = ghostLap,
+            trackName = "Apex Speedway GP",
+            vehicleId = "apex_gt86"
+        )
+        assertNotNull(saved)
+        assertEquals(42000L, saved.lapTimeMs)
+
+        val updatedBest = repository.getBestReplayForTrack("apex_speedway")
+        assertNotNull(updatedBest)
+        assertEquals(42000L, updatedBest!!.lapTimeMs)
+        assertEquals("Apex GT-86 Coupe", updatedBest.vehicleName)
+    }
+
+    @Test
+    fun `test physics integration module velocity integration and threshold damping`() {
+        val integrator = com.example.physics.PhysicsIntegrationModule()
+        val vehicle = VehicleRegistry.createDefaultVehicles().first()
+        val track = TrackRegistry.allTracks.first()
+
+        val state = com.example.physics.CarPhysicsState(
+            x = 800f,
+            y = 500f,
+            vx = 0f,
+            vy = 0f,
+            headingDeg = 0f
+        )
+
+        // Step 1: Stationary vehicle with no throttle should remain at rest without jitter
+        val idleResult = integrator.integrate(
+            state = state,
+            vehicle = vehicle,
+            track = track,
+            currentWeather = com.example.model.WeatherType.SUNNY_CLEAR,
+            trackWetness = 0f,
+            throttleInput = 0f,
+            brakeInput = 0f,
+            steerInput = 0f,
+            handbrakeInput = false,
+            boostInput = false,
+            dt = 0.016f
+        )
+        assertEquals(0f, idleResult.velocity.vx, 0.001f)
+        assertEquals(0f, idleResult.velocity.vy, 0.001f)
+        assertEquals(0f, idleResult.velocity.speedKmh, 0.001f)
+
+        // Step 2: Apply full throttle -> forward acceleration along heading
+        val accelResult = integrator.integrate(
+            state = state,
+            vehicle = vehicle,
+            track = track,
+            currentWeather = com.example.model.WeatherType.SUNNY_CLEAR,
+            trackWetness = 0f,
+            throttleInput = 1.0f,
+            brakeInput = 0f,
+            steerInput = 0f,
+            handbrakeInput = false,
+            boostInput = false,
+            dt = 0.016f
+        )
+        assertTrue("Vehicle should produce positive forward longitudinal acceleration", accelResult.velocity.longitudinalAcc > 0f)
+        assertTrue("Velocity X should increase in heading direction", accelResult.velocity.vx > 0f)
+        assertTrue("Speed km/h should be greater than zero", accelResult.velocity.speedKmh > 0f)
+        assertTrue("Longitudinal velocity matches forward motion", accelResult.velocity.vLong > 0f)
+    }
+
+    @Test
+    fun `test physics integration module aerodynamic drag and rolling resistance`() {
+        val integrator = com.example.physics.PhysicsIntegrationModule()
+
+        // 1. Aerodynamic drag follows v^2 relationship
+        val dragAt10Ms = integrator.calculateAerodynamicDrag(vLong = 10f)
+        val dragAt20Ms = integrator.calculateAerodynamicDrag(vLong = 20f)
+        assertTrue("Drag at 20 m/s should be ~4x drag at 10 m/s", dragAt20Ms > dragAt10Ms * 3.8f)
+
+        // 2. Rolling resistance increases on grass and gravel vs asphalt
+        val asphaltCrr = integrator.calculateRollingResistanceCoeff(
+            hazard = null,
+            isOffTrack = false,
+            weather = com.example.model.WeatherType.SUNNY_CLEAR
+        )
+        val grassCrr = integrator.calculateRollingResistanceCoeff(
+            hazard = com.example.model.SurfaceHazardType.OFFROAD_GRASS,
+            isOffTrack = true,
+            weather = com.example.model.WeatherType.SUNNY_CLEAR
+        )
+        val gravelCrr = integrator.calculateRollingResistanceCoeff(
+            hazard = com.example.model.SurfaceHazardType.GRAVEL_TRAP,
+            isOffTrack = true,
+            weather = com.example.model.WeatherType.SUNNY_CLEAR
+        )
+        assertTrue("Grass Crr exceeds asphalt", grassCrr > asphaltCrr * 5f)
+        assertTrue("Gravel Crr exceeds grass", gravelCrr > grassCrr)
+
+        // 3. Normal load rolling resistance calculation
+        val normalLoad = 12000f // 12 kN ~ 1220 kg
+        val rrForceAsphalt = integrator.calculateRollingResistance(vLong = 25f, normalLoadN = normalLoad, rollingCoeff = asphaltCrr)
+        val rrForceGrass = integrator.calculateRollingResistance(vLong = 25f, normalLoadN = normalLoad, rollingCoeff = grassCrr)
+        assertTrue("Rolling resistance is positive opposing forward speed", rrForceAsphalt > 0f)
+        assertTrue("Grass rolling resistance is significantly higher than asphalt", rrForceGrass > rrForceAsphalt * 5f)
+    }
+
+    @Test
+    fun `test physics integration module tire grip and Pacejka curve`() {
+        val integrator = com.example.physics.PhysicsIntegrationModule()
+
+        // 1. Thermal grip curve
+        val coldGrip = integrator.calculateThermalGripMultiplier(avgTireTempC = 30f)
+        val optimalGrip = integrator.calculateThermalGripMultiplier(avgTireTempC = 85f)
+        val overheatedGrip = integrator.calculateThermalGripMultiplier(avgTireTempC = 135f)
+        assertTrue("Optimal temperature has peak 1.0 grip", optimalGrip == 1.0f)
+        assertTrue("Cold tire has reduced grip", coldGrip < optimalGrip)
+        assertTrue("Overheated tire suffers thermal blistering and reduced grip", overheatedGrip < optimalGrip)
+
+        // 2. Pacejka Magic Formula non-linear curve
+        val forceAtSmallSlip = integrator.pacejkaMagicFormula(
+            slip = 2f, // 2 degrees slip angle
+            B = 0.22f,
+            C = 1.35f,
+            D = 10000f,
+            E = -0.45f
+        )
+        val forceAtPeakSlip = integrator.pacejkaMagicFormula(
+            slip = 8.5f, // ~8.5 degrees peak
+            B = 0.22f,
+            C = 1.35f,
+            D = 10000f,
+            E = -0.45f
+        )
+        val forceAtExcessiveSlip = integrator.pacejkaMagicFormula(
+            slip = 25f, // Deep sliding drift
+            B = 0.22f,
+            C = 1.35f,
+            D = 10000f,
+            E = -0.45f
+        )
+        assertTrue("Force grows from small to peak slip", forceAtPeakSlip > forceAtSmallSlip)
+        assertTrue("Peak grip force approaches D", forceAtPeakSlip in 8000f..10000f)
+        assertTrue("Excessive slip saturates and slides", forceAtExcessiveSlip > 0f)
+    }
+
+    @Test
+    fun `test WeatherManager randomized race weather state trigger`() {
+        val observedConditions = mutableSetOf<com.example.model.WeatherCondition>()
+        // Trigger randomized weather state over multiple iterations
+        for (seed in 1..40) {
+            val random = kotlin.random.Random(seed)
+            val condition = com.example.model.WeatherManager.triggerRandomRaceWeather(random)
+            observedConditions.add(condition)
+            assertTrue("Selected condition is valid", condition in com.example.model.WeatherCondition.values())
+            assertNotNull(com.example.model.WeatherManager.raceStartBanner.value)
+        }
+        assertTrue("Randomizer should produce diverse weather states", observedConditions.size >= 2)
+        assertTrue("Contains Sunny or Rain or Snow", observedConditions.any { it.isSunny || it.isRainy || it.isSnowy })
+    }
+
+    @Test
+    fun `test WeatherManager vehicle traction dynamic influence`() {
+        // 1. Sunny / Clear traction baseline
+        com.example.model.WeatherManager.setCondition(com.example.model.WeatherCondition.CLEAR)
+        val sunnyHandling = com.example.model.WeatherManager.getHandlingParameters()
+        assertEquals(1.0f, sunnyHandling.gripMultiplier, 0.01f)
+        assertEquals(1.0f, sunnyHandling.accelerationTractionMultiplier, 0.01f)
+        assertEquals(1.0f, sunnyHandling.brakingEfficiencyMultiplier, 0.01f)
+        val sunnyStoppingDist = com.example.model.WeatherManager.calculateStoppingDistanceMeters(speedKmh = 100f)
+        assertTrue("Sunny stopping distance is optimal ~38.5m", sunnyStoppingDist in 35f..42f)
+
+        // 2. Rainy traction reduction
+        com.example.model.WeatherManager.setCondition(com.example.model.WeatherCondition.RAIN)
+        val rainHandling = com.example.model.WeatherManager.getHandlingParameters()
+        assertTrue("Rain reduces grip to ~70%", rainHandling.gripMultiplier in 0.65f..0.75f)
+        assertTrue("Rain reduces acceleration traction", rainHandling.accelerationTractionMultiplier < sunnyHandling.accelerationTractionMultiplier)
+        assertTrue("Rain reduces braking efficiency", rainHandling.brakingEfficiencyMultiplier < sunnyHandling.brakingEfficiencyMultiplier)
+        val rainStoppingDist = com.example.model.WeatherManager.calculateStoppingDistanceMeters(speedKmh = 100f)
+        assertTrue("Rain stopping distance is ~33% longer than sunny", rainStoppingDist > sunnyStoppingDist * 1.30f)
+
+        // 3. Snowy traction severe loss
+        com.example.model.WeatherManager.setCondition(com.example.model.WeatherCondition.SNOW)
+        val snowHandling = com.example.model.WeatherManager.getHandlingParameters()
+        assertTrue("Snow reduces grip to ~40%", snowHandling.gripMultiplier in 0.35f..0.45f)
+        assertTrue("Snow acceleration traction severely hampered", snowHandling.accelerationTractionMultiplier <= 0.40f)
+        val snowStoppingDist = com.example.model.WeatherManager.calculateStoppingDistanceMeters(speedKmh = 100f)
+        assertTrue("Snow stopping distance is ~2.27x longer than sunny", snowStoppingDist > sunnyStoppingDist * 2.2f)
+
+        // 4. Tire compound interaction with weather traction
+        val softSlickGripInRain = com.example.model.WeatherManager.calculateEffectiveGrip(
+            baseGrip = 1.0f,
+            condition = com.example.model.WeatherCondition.RAIN,
+            compound = TireCompound.SOFT_SLICK
+        )
+        val wetTireGripInRain = com.example.model.WeatherManager.calculateEffectiveGrip(
+            baseGrip = 1.0f,
+            condition = com.example.model.WeatherCondition.RAIN,
+            compound = TireCompound.FULL_WET
+        )
+        assertTrue("Full wet tire provides superior grip in rainy weather over soft slick", wetTireGripInRain > softSlickGripInRain)
+    }
+
+    @Test
+    fun `test WeatherManager visual track conditions dynamic influence`() {
+        // 1. Sunny visual track conditions
+        val sunnyVisual = com.example.model.WeatherManager.getVisualTrackConditions(com.example.model.WeatherCondition.CLEAR)
+        assertEquals(com.example.ui.theme.AsphaltColor, sunnyVisual.asphaltColor)
+        assertEquals(com.example.ui.theme.GrassGreenColor, sunnyVisual.grassRunoffColor)
+        assertEquals(com.example.model.WeatherPrecipitationType.NONE, sunnyVisual.precipitationType)
+        assertEquals(0.0f, sunnyVisual.trackWetness, 0.01f)
+        assertEquals(0.0f, sunnyVisual.snowEdgeAccumulation, 0.01f)
+
+        // 2. Rainy visual track conditions
+        val rainVisual = com.example.model.WeatherManager.getVisualTrackConditions(com.example.model.WeatherCondition.RAIN)
+        assertEquals(com.example.ui.theme.AsphaltWetColor, rainVisual.asphaltColor)
+        assertEquals(com.example.ui.theme.DampGrassColor, rainVisual.grassRunoffColor)
+        assertEquals(com.example.model.WeatherPrecipitationType.RAIN_STREAKS, rainVisual.precipitationType)
+        assertEquals(0.75f, rainVisual.trackWetness, 0.01f)
+        assertTrue("Rain asphalt wetness sheen is active", rainVisual.asphaltWetnessSheen > 0.5f)
+
+        // 3. Snowy visual track conditions
+        val snowVisual = com.example.model.WeatherManager.getVisualTrackConditions(com.example.model.WeatherCondition.SNOW)
+        assertEquals(com.example.ui.theme.SnowTrackColor, snowVisual.asphaltColor)
+        assertEquals(com.example.ui.theme.SnowGroundColor, snowVisual.grassRunoffColor)
+        assertEquals(com.example.model.WeatherPrecipitationType.SNOW_FLURRIES, snowVisual.precipitationType)
+        assertEquals(0.90f, snowVisual.trackWetness, 0.01f)
+        assertTrue("Snow edge accumulation is active along track margins", snowVisual.snowEdgeAccumulation > 0.5f)
+    }
 }
 
 

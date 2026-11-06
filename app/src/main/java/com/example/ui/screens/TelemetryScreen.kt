@@ -43,6 +43,7 @@ import com.example.ui.theme.ApexCyan
 import com.example.ui.theme.ApexGold
 import com.example.ui.theme.ApexGreen
 import com.example.ui.theme.ApexOrange
+import com.example.ui.theme.ApexRed
 import com.example.ui.theme.CarbonBlack
 import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.DarkSurfaceElevated
@@ -231,6 +232,153 @@ fun TelemetryScreen(
         // G-G Friction Circle Diagram
         item {
             GForceFrictionCircle(points = telemetryHistory)
+        }
+
+        // Real-Time Vehicle Physics Integration Module Metrics
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("physics_integration_telemetry_card"),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder)
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "PHYSICS INTEGRATION & FORCES",
+                            color = ApexCyan,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(DarkSurfaceElevated)
+                                .border(1.dp, ApexCyan, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text("SEMI-IMPLICIT EULER", color = ApexCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // 1. Velocity Decomposition
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("REAL-TIME VELOCITY DECOMPOSITION", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PhysicsMiniStat(
+                                label = "LONGITUDINAL",
+                                value = String.format("%.1f m/s", current?.vLongMs ?: 0f),
+                                sub = "Along Heading",
+                                color = TextWhite,
+                                modifier = Modifier.weight(1f)
+                            )
+                            PhysicsMiniStat(
+                                label = "LATERAL",
+                                value = String.format("%.1f m/s", current?.vLatMs ?: 0f),
+                                sub = "Cornering Drift",
+                                color = if (kotlin.math.abs(current?.vLatMs ?: 0f) > 2f) ApexOrange else TextWhite,
+                                modifier = Modifier.weight(1f)
+                            )
+                            PhysicsMiniStat(
+                                label = "SLIP ANGLE",
+                                value = String.format("%.1f°", current?.slipAngleDeg ?: 0f),
+                                sub = "Tire Deflection",
+                                color = if (kotlin.math.abs(current?.slipAngleDeg ?: 0f) > 8f) ApexRed else ApexGreen,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    // 2. Opposing Friction Forces
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("OPPOSING FRICTION BREAKDOWN", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PhysicsMiniStat(
+                                label = "AERO DRAG",
+                                value = "${current?.frictionDragN?.toInt() ?: 0} N",
+                                sub = "0.5*ρ*Cd*A*v²",
+                                color = ApexGold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            PhysicsMiniStat(
+                                label = "ROLLING RES.",
+                                value = "${current?.frictionRollingN?.toInt() ?: 0} N",
+                                sub = "Crr * N",
+                                color = ApexCyan,
+                                modifier = Modifier.weight(1f)
+                            )
+                            PhysicsMiniStat(
+                                label = "TOTAL FRICTION",
+                                value = "${current?.totalFrictionN?.toInt() ?: 0} N",
+                                sub = "Drag + Rolling",
+                                color = ApexOrange,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    // 3. Dynamic Tire Grip & Adhesion
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("DYNAMIC TIRE GRIP & CONTACT PATCH", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PhysicsMiniStat(
+                                label = "EFFECTIVE GRIP",
+                                value = "${((current?.effectiveGripPct ?: 1f) * 100).toInt()}%",
+                                sub = "Compound x Surface",
+                                color = if ((current?.effectiveGripPct ?: 1f) < 0.6f) ApexRed else ApexGreen,
+                                modifier = Modifier.weight(1f)
+                            )
+                            PhysicsMiniStat(
+                                label = "SLIP RATIO",
+                                value = String.format("%+.1f%%", (current?.slipRatio ?: 0f) * 100f),
+                                sub = "Wheel Spin/Lock",
+                                color = if (kotlin.math.abs(current?.slipRatio ?: 0f) > 0.15f) ApexOrange else TextWhite,
+                                modifier = Modifier.weight(1f)
+                            )
+                            PhysicsMiniStat(
+                                label = "FRICTION CIRCLE",
+                                value = "${(current?.frictionCirclePct ?: 0f).toInt()}%",
+                                sub = "Combined Adhesion",
+                                color = if ((current?.frictionCirclePct ?: 0f) > 90f) ApexRed else ApexCyan,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhysicsMiniStat(
+    label: String,
+    value: String,
+    sub: String,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(DarkSurfaceElevated)
+            .border(1.dp, SurfaceBorder, RoundedCornerShape(8.dp))
+            .padding(8.dp)
+    ) {
+        Column {
+            Text(label, color = TextMuted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(value, color = color, fontSize = 13.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+            Text(sub, color = TextMuted, fontSize = 8.sp)
         }
     }
 }

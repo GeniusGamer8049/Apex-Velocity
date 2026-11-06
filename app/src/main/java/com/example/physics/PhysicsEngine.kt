@@ -49,10 +49,28 @@ data class CarPhysicsState(
     var driftScore: Int = 0,
     var estimatedBrakingDistanceM: Float = 38.5f,
     var effectiveTopSpeedKmh: Float = 240f,
-    var raceFinished: Boolean = false
+    var raceFinished: Boolean = false,
+    // Real-time Physics Integration Module Variables
+    var frictionDragForceN: Float = 0f,
+    var frictionRollingResistanceN: Float = 0f,
+    var frictionTotalOpposingN: Float = 0f,
+    var tireSlipRatio: Float = 0f,
+    var frontTireGripPct: Float = 1.0f,
+    var rearTireGripPct: Float = 1.0f,
+    var frictionCircleUtilizationPct: Float = 0f,
+    var isWheelSpinning: Boolean = false,
+    var isWheelLockup: Boolean = false,
+    var normalLoadFrontN: Float = 0f,
+    var normalLoadRearN: Float = 0f,
+    var corneringForceN: Float = 0f,
+    var tractionForceN: Float = 0f,
+    var localVLong: Float = 0f,
+    var localVLat: Float = 0f
 )
 
-class PhysicsEngine {
+class PhysicsEngine(
+    val integrationModule: PhysicsIntegrationModule = PhysicsIntegrationModule()
+) {
 
     val gearRatios = floatArrayOf(3.6f, 2.15f, 1.50f, 1.15f, 0.90f, 0.74f)
     val finalDrive = 3.9f
@@ -79,20 +97,65 @@ class PhysicsEngine {
         val prevX = state.x
         val prevY = state.y
 
-        // 1. Heading vectors
-        val headingRad = Math.toRadians(state.headingDeg.toDouble())
-        val forwardX = cos(headingRad).toFloat()
-        val forwardY = sin(headingRad).toFloat()
-        val rightX = -sin(headingRad).toFloat()
-        val rightY = cos(headingRad).toFloat()
+        // Execute real-time vehicle velocity, friction, and tire grip integration step
+        val result = integrationModule.integrate(
+            state = state,
+            vehicle = vehicle,
+            track = track,
+            currentWeather = currentWeather,
+            trackWetness = trackWetness,
+            throttleInput = throttleInput,
+            brakeInput = brakeInput,
+            steerInput = steerInput,
+            handbrakeInput = handbrakeInput,
+            boostInput = boostInput,
+            dt = dt,
+            weatherAdjustment = weatherAdjustment
+        )
 
-        // 2. Velocity decomposition in local car frame
-        val vLong = state.vx * forwardX + state.vy * forwardY
-        val vLat = state.vx * rightX + state.vy * rightY
-        val speedMs = sqrt(state.vx * state.vx + state.vy * state.vy)
-        state.speedKmh = speedMs * 3.6f
+        // 1. Update Real-Time Velocity Variables
+        state.vx = result.velocity.vx
+        state.vy = result.velocity.vy
+        state.speedKmh = result.velocity.speedKmh
+        state.headingDeg = result.velocity.headingDeg
+        state.angularVelocity = result.velocity.angularVelocityDegPerSec
+        state.longitudinalG = result.velocity.longitudinalG
+        state.lateralG = result.velocity.lateralG
+        state.localVLong = result.velocity.vLong
+        state.localVLat = result.velocity.vLat
 
-        // 3. Surface & Weather Condition Sampling
+        // 2. Update Real-Time Friction Variables
+        state.frictionDragForceN = result.friction.aerodynamicDragForceN
+        state.frictionRollingResistanceN = result.friction.rollingResistanceForceN
+        state.frictionTotalOpposingN = result.friction.totalOpposingFrictionN
+
+        // 3. Update Real-Time Tire Grip & Adhesion Variables
+        state.effectiveTireGrip = result.tireGrip.effectiveTireGripPct
+        state.slipAngleDeg = result.tireGrip.slipAngleDeg
+        state.tireSlipRatio = result.tireGrip.slipRatio
+        state.frontTireGripPct = result.tireGrip.frontAxleGripPct
+        state.rearTireGripPct = result.tireGrip.rearAxleGripPct
+        state.frictionCircleUtilizationPct = result.tireGrip.frictionCircleUtilizationPct
+        state.isWheelSpinning = result.tireGrip.isWheelSpinning
+        state.isWheelLockup = result.tireGrip.isWheelLockup
+        state.normalLoadFrontN = result.tireGrip.normalLoadFrontN
+        state.normalLoadRearN = result.tireGrip.normalLoadRearN
+        state.corneringForceN = result.tireGrip.corneringForceN
+        state.tractionForceN = result.tireGrip.tractionForceN
+        state.downforceN = result.tireGrip.totalNormalLoadN - (vehicle.effectiveWeightKg * 9.81f)
+        state.isDrifting = result.tireGrip.isDrifting
+        state.isAquaplaning = result.tireGrip.isAquaplaning
+        state.isBraking = brakeInput > 0.05f
+
+        // 4. Update Engine & Boost Transmission
+        state.rpm = result.newRpm
+        state.currentGear = result.newGear
+        state.boostGauge = result.boostGauge
+        state.isBoosting = result.isBoosting
+        state.x = result.newX
+        state.y = result.newY
+
+        // 5. Environmental Surface & Hazard
         val nearestWaypointIdx = track.findNearestWaypointIndex(state.x, state.y)
         val nearestWaypoint = track.waypoints[nearestWaypointIdx]
         val distToCenterSq = (state.x - nearestWaypoint.x) * (state.x - nearestWaypoint.x) +
@@ -100,7 +163,6 @@ class PhysicsEngine {
         val halfTrackWidth = nearestWaypoint.width * 0.5f
         val isOffTrack = distToCenterSq > (halfTrackWidth * halfTrackWidth)
 
-        // Check hazard patches
         var activeHazard: SurfaceHazardType? = null
         for (patch in track.surfacePatches) {
             if (patch.contains(state.x, state.y)) {
@@ -115,183 +177,42 @@ class PhysicsEngine {
         }
         state.currentSurfaceHazard = activeHazard
 
-        // Calculate weather tire grip
-        val compound = vehicle.upgrades.tireCompound
-        val weatherDryFactor = compound.dryGripMultiplier
-        val weatherWetFactor = compound.wetGripMultiplier
-        val weatherGrip = weatherDryFactor * (1f - trackWetness) + weatherWetFactor * trackWetness
-
-        // Aquaplaning check: high speed through standing water on dry-oriented tires
-        val isPuddle = activeHazard == SurfaceHazardType.PUDDLE
-        val aquaplaneRisk = (state.speedKmh > 75f) && (trackWetness > 0.35f || isPuddle) &&
-                (compound == TireCompound.SOFT_SLICK || compound == TireCompound.SEMI_SLICK)
-        state.isAquaplaning = aquaplaneRisk
-
-        // Hazard multiplier
-        var hazardGripFactor = 1.0f
-        if (activeHazard != null) {
-            hazardGripFactor = activeHazard.gripFactor
-            if (state.isAquaplaning) {
-                hazardGripFactor = 0.20f
-            }
-        }
-
-        // Dynamic Weather Handling Parameters
+        // Estimated Braking Distance & Dynamic Top Speed
+        val speedMs = result.velocity.speedMs
         val weatherHandling = WeatherManager.getHandlingParameters(currentWeather)
-        val gripMult = weatherAdjustment?.gripMultiplier ?: weatherHandling.gripMultiplier
         val brakeMult = weatherAdjustment?.brakingEfficiencyMultiplier ?: weatherHandling.brakingEfficiencyMultiplier
-        val accelMult = weatherAdjustment?.accelerationTractionMultiplier ?: weatherHandling.accelerationTractionMultiplier
-        val dragMult = weatherAdjustment?.topSpeedDragMultiplier ?: weatherHandling.topSpeedDragMultiplier
-        val steerMult = weatherAdjustment?.steeringResponseMultiplier ?: weatherHandling.steeringResponseMultiplier
-
-        // Combined tire grip
-        val baseTireGrip = vehicle.effectiveGripMultiplier * weatherGrip * hazardGripFactor * gripMult
-        state.effectiveTireGrip = baseTireGrip
-        state.effectiveTopSpeedKmh = weatherAdjustment?.effectiveTopSpeedKmh ?: (vehicle.effectiveTopSpeedKmh / dragMult.coerceAtLeast(0.5f))
+        state.effectiveTopSpeedKmh = weatherAdjustment?.effectiveTopSpeedKmh ?: vehicle.effectiveTopSpeedKmh.toFloat()
         state.estimatedBrakingDistanceM = weatherAdjustment?.brakingDistanceAtCurrentSpeed
             ?: if (speedMs > 0.5f) (speedMs * speedMs) / (2f * 9.81f * 1.35f * vehicle.effectiveBrakingPower * brakeMult).coerceAtLeast(0.5f) else 0f
 
-        // 4. Boost / Nitrous System
-        var boostMultiplier = 1.0f
-        if (boostInput && state.boostGauge > 0.05f) {
-            state.isBoosting = true
-            state.boostGauge = (state.boostGauge - 0.25f * dt).coerceAtLeast(0f)
-            boostMultiplier = 1.45f
+        // Boost particles
+        if (state.isBoosting) {
             particleSystem.spawnWaterSpray(state.x, state.y, state.headingDeg, intensity = 1.5f)
-        } else {
-            state.isBoosting = false
-            state.boostGauge = (state.boostGauge + 0.08f * dt).coerceAtMost(1.0f)
         }
-
-        // 5. Gear Transmission & RPM Simulation
-        val effectiveTopSpeedMs = vehicle.effectiveTopSpeedKmh / 3.6f
-        val gearIdx = (state.currentGear - 1).coerceIn(0, 5)
-        val currentRatio = gearRatios[gearIdx]
-
-        // Engine power to torque
-        val maxPowerWatts = vehicle.effectiveBhp * 745.7f * boostMultiplier
-        val maxTorqueNm = (maxPowerWatts / (vehicle.baseMaxRpm * 0.1047f)) * 1.35f
-
-        // RPM calculation based on wheel speed
-        val wheelRps = (vLong.coerceAtLeast(0f) / (2f * PI.toFloat() * wheelRadiusM))
-        val targetEngineRpm = (wheelRps * currentRatio * finalDrive * 60f)
-            .coerceIn(900f, vehicle.baseMaxRpm.toFloat() + 400f)
-
-        // Smooth RPM interpolation with throttle revving
-        if (throttleInput > 0.1f && vLong < 2f) {
-            state.rpm += 4500f * throttleInput * dt
-            if (state.rpm > vehicle.baseMaxRpm) state.rpm = vehicle.baseMaxRpm - 200f // Redline bounce
-        } else {
-            state.rpm += (targetEngineRpm - state.rpm) * (8f * dt)
-        }
-        state.rpm = state.rpm.coerceIn(850f, vehicle.baseMaxRpm.toFloat() + 300f)
-
-        // Automatic gear shifting with shift delay logic
-        if (state.rpm > (vehicle.baseMaxRpm * 0.92f) && state.currentGear < 6) {
-            state.currentGear++
-            state.rpm = vehicle.baseMaxRpm * 0.65f
-        } else if (state.rpm < 2200f && state.currentGear > 1 && vLong > 2f) {
-            state.currentGear--
-            state.rpm = vehicle.baseMaxRpm * 0.72f
-        }
-
-        // 6. Driving and Braking Forces
-        var drivingForce = 0f
-        if (throttleInput > 0f) {
-            val torque = maxTorqueNm * (0.6f + 0.4f * (state.rpm / vehicle.baseMaxRpm))
-            val drivetrainFactor = when (vehicle.driveTrain) {
-                DriveTrain.AWD -> 1.05f
-                DriveTrain.RWD -> 1.0f
-                DriveTrain.FWD -> 0.90f
-            }
-            drivingForce = (torque * currentRatio * finalDrive / wheelRadiusM) * throttleInput * drivetrainFactor * accelMult
-        }
-
-        var brakingForce = 0f
-        state.isBraking = brakeInput > 0.05f
-        if (state.isBraking) {
-            val baseBrakeForce = (vehicle.effectiveWeightKg * 9.8f) * 1.35f * vehicle.effectiveBrakingPower
-            brakingForce = baseBrakeForce * brakeInput * brakeMult
-        }
-
-        // Reverse gear handling
-        if (brakeInput > 0.3f && vLong <= 0.5f) {
-            drivingForce = -maxTorqueNm * gearRatios[0] * 1.5f * brakeInput
-            brakingForce = 0f
-            state.currentGear = 1
-        }
-
-        // Aerodynamic Drag & Downforce
-        val aeroDownforceFactor = vehicle.effectiveDownforceFactor
-        val downforceN = 0.5f * 1.225f * (0.8f + aeroDownforceFactor) * (speedMs * speedMs)
-        val dragForce = 0.5f * 1.225f * 0.34f * 2.1f * (vLong * abs(vLong)) * dragMult
-
-        // Rolling resistance & off-track drag
-        var rollingResistanceCoeff = 0.015f
-        if (activeHazard == SurfaceHazardType.OFFROAD_GRASS) rollingResistanceCoeff = 0.22f
-        if (activeHazard == SurfaceHazardType.GRAVEL_TRAP) rollingResistanceCoeff = 0.45f
-        val rollingResistance = rollingResistanceCoeff * vehicle.effectiveWeightKg * 9.8f * (if (vLong > 0) 1f else -1f)
-
-        // Net longitudinal force
-        val netLongForce = drivingForce - (brakingForce * (if (vLong > 0) 1f else -1f)) - dragForce - rollingResistance
-        val longAcc = netLongForce / vehicle.effectiveWeightKg
-        state.longitudinalG = (longAcc / 9.81f).coerceIn(-2.5f, 2.5f)
-        state.downforceN = downforceN
-
-        // 7. Lateral Cornering & Drift Physics (Pacejka Curve)
-        val slipAngleRad = if (abs(vLong) > 0.5f) atan2(vLat.toDouble(), abs(vLong).toDouble()).toFloat() else 0f
-        state.slipAngleDeg = Math.toDegrees(slipAngleRad.toDouble()).toFloat()
-
-        // Peak slip angle (~7 to 11 degrees)
-        val peakSlipDeg = 8.5f * (1f / baseTireGrip.coerceAtLeast(0.4f)) * (1f / steerMult)
-        val normalizedSlip = (abs(state.slipAngleDeg) / peakSlipDeg)
-
-        // Lateral adhesion limit
-        val totalVerticalLoad = (vehicle.effectiveWeightKg * 9.8f) + downforceN
-        val maxCorneringForce = totalVerticalLoad * baseTireGrip
-
-        // Handbrake overrides rear lateral grip to provoke drift
-        val handbrakeMultiplier = if (handbrakeInput) 0.25f else 1.0f
-        val effectiveMaxCorneringForce = maxCorneringForce * handbrakeMultiplier
-
-        // Cornering friction response
-        val lateralFrictionForce = if (normalizedSlip < 1.0f) {
-            // Linear adhesive region
-            -vLat * (effectiveMaxCorneringForce / peakSlipDeg)
-        } else {
-            // Saturated sliding/drift region
-            -(vLat / (abs(vLat).coerceAtLeast(0.1f))) * (effectiveMaxCorneringForce * (0.85f / normalizedSlip.coerceAtMost(3f)))
-        }
-
-        val latAcc = lateralFrictionForce / vehicle.effectiveWeightKg
-        state.lateralG = abs(latAcc) / 9.81f
 
         // Tire Thermal Dynamics (FL, FR, RL, RR)
         val ambientTemp = if (trackWetness > 0.5f) 65f else 78f
         val coolingRate = if (trackWetness > 0.3f) weatherHandling.tireCoolingRate else 1.2f
         val frontBrakeHeating = if (state.isBraking) brakeInput * 24f else 0f
-        val lateralHeatingFL = if (vLat < 0) abs(state.lateralG) * 16f else abs(state.lateralG) * 7f
-        val lateralHeatingFR = if (vLat > 0) abs(state.lateralG) * 16f else abs(state.lateralG) * 7f
+        val lateralHeatingFL = if (state.localVLat < 0) abs(state.lateralG) * 16f else abs(state.lateralG) * 7f
+        val lateralHeatingFR = if (state.localVLat > 0) abs(state.lateralG) * 16f else abs(state.lateralG) * 7f
         val rearPowerHeating = if (throttleInput > 0.4f) throttleInput * 14f else 0f
         val driftHeating = if (state.isDrifting) (abs(state.slipAngleDeg) / 10f) * 25f else 0f
 
         state.tireTempFL += (frontBrakeHeating + lateralHeatingFL - (state.tireTempFL - ambientTemp) * coolingRate) * dt
         state.tireTempFR += (frontBrakeHeating + lateralHeatingFR - (state.tireTempFR - ambientTemp) * coolingRate) * dt
-        state.tireTempRL += (rearPowerHeating + driftHeating + (if (vLat < 0) abs(state.lateralG) * 10f else 4f) - (state.tireTempRL - ambientTemp) * coolingRate) * dt
-        state.tireTempRR += (rearPowerHeating + driftHeating + (if (vLat > 0) abs(state.lateralG) * 10f else 4f) - (state.tireTempRR - ambientTemp) * coolingRate) * dt
+        state.tireTempRL += (rearPowerHeating + driftHeating + (if (state.localVLat < 0) abs(state.lateralG) * 10f else 4f) - (state.tireTempRL - ambientTemp) * coolingRate) * dt
+        state.tireTempRR += (rearPowerHeating + driftHeating + (if (state.localVLat > 0) abs(state.lateralG) * 10f else 4f) - (state.tireTempRR - ambientTemp) * coolingRate) * dt
 
         state.tireTempFL = state.tireTempFL.coerceIn(45f, 145f)
         state.tireTempFR = state.tireTempFR.coerceIn(45f, 145f)
         state.tireTempRL = state.tireTempRL.coerceIn(45f, 145f)
         state.tireTempRR = state.tireTempRR.coerceIn(45f, 145f)
 
-        // Drift state & score
-        val isSliding = abs(state.slipAngleDeg) > weatherHandling.lateralSlipThresholdDeg && speedMs > 6f
-        state.isDrifting = isSliding
+        // Drift state & scoring
         if (state.isDrifting) {
             val driftAdd = (abs(state.slipAngleDeg) * (state.speedKmh / 50f) * dt * 8f).toInt()
             state.driftScore += driftAdd
-            // Spawn tire smoke & skid marks
             particleSystem.spawnSmoke(state.x, state.y, state.headingDeg, intensity = (abs(state.slipAngleDeg) / 30f))
             particleSystem.addSkid(prevX, prevY, state.x, state.y, alpha = (abs(state.slipAngleDeg) / 45f))
         }
@@ -300,48 +221,6 @@ class PhysicsEngine {
         if (trackWetness > 0.2f && speedMs > 10f) {
             particleSystem.spawnWaterSpray(state.x, state.y, state.headingDeg, intensity = trackWetness * (speedMs / 25f))
         }
-
-        // 8. Steering & Yaw Dynamics
-        val steerResponse = (vehicle.upgrades.suspensionStage * 0.1f + 1.0f)
-        val speedSteerFactor = (1f / (1f + (speedMs / 28f))).coerceIn(0.28f, 1.0f)
-        val targetAngularVel = steerInput * 165f * steerResponse * speedSteerFactor * (if (vLong < 0) -1f else 1f)
-
-        // Drift counter-steering feel
-        val oversteerBias = when (vehicle.driveTrain) {
-            DriveTrain.RWD -> 1.35f
-            DriveTrain.AWD -> 0.75f
-            DriveTrain.FWD -> 0.40f
-        }
-        val driftYawInfluence = if (state.isDrifting) {
-            -(state.slipAngleDeg * 1.8f * oversteerBias)
-        } else 0f
-
-        state.angularVelocity += (targetAngularVel + driftYawInfluence - state.angularVelocity) * (14f * dt)
-        if (state.isAquaplaning) {
-            // Aquaplaning: steering wheel loses connection with road!
-            state.angularVelocity *= 0.2f
-        }
-
-        state.headingDeg += state.angularVelocity * dt
-        while (state.headingDeg < 0f) state.headingDeg += 360f
-        while (state.headingDeg >= 360f) state.headingDeg -= 360f
-
-        // 9. Update World Velocity
-        val newVLong = vLong + longAcc * dt
-        val newVLat = vLat + latAcc * dt
-
-        val newHeadingRad = Math.toRadians(state.headingDeg.toDouble())
-        val newForwardX = cos(newHeadingRad).toFloat()
-        val newForwardY = sin(newHeadingRad).toFloat()
-        val newRightX = -sin(newHeadingRad).toFloat()
-        val newRightY = cos(newRightRad(newHeadingRad)).toFloat() // Correct right vector
-
-        state.vx = newVLong * newForwardX + newVLat * (-sin(newHeadingRad).toFloat())
-        state.vy = newVLong * newForwardY + newVLat * (cos(newHeadingRad).toFloat())
-
-        // 10. Position update
-        state.x += state.vx * dt
-        state.y += state.vy * dt
 
         // 11. Barrier & Track Limits Collision
         // If car goes too far off-track beyond gravel run-off, softly deflect back

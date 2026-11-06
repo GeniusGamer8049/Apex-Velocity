@@ -58,7 +58,8 @@ enum class AppScreen {
     POST_RACE,
     DRIVER_PROFILE,
     RACE_HISTORY,
-    PERFORMANCE_ANALYTICS
+    PERFORMANCE_ANALYTICS,
+    REPLAY
 }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -70,7 +71,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val achievementsRepository: com.example.data.AchievementsRepository = repository.achievementsRepository
     val dailyChallengesRepository: com.example.data.DailyChallengesRepository = repository.dailyChallengesRepository
     val globalLeaderboardsRepository: com.example.data.GlobalLeaderboardsRepository = repository.globalLeaderboardsRepository
+    val replayStorageRepository: com.example.data.ReplayStorageRepository = repository.replayStorageRepository
     val profile: StateFlow<PlayerProfile> = repository.profile
+    val allReplays: Flow<List<com.example.data.room.ReplayStorage>> = replayStorageRepository.allReplaysFlow
+    val replaySelectedTrackId = MutableStateFlow(TrackRegistry.allTracks.first().id)
     val dbDriverProfile: Flow<DriverProfile?> = driverProfileRepository.driverProfileFlow
     val recentGameStatistics: Flow<List<GameStatistics>> = gameStatisticsRepository.recentGameStatisticsFlow
     val allGameStatistics: Flow<List<GameStatistics>> = gameStatisticsRepository.allGameStatisticsFlow
@@ -93,6 +97,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun getWorldRecordForTrack(trackId: String): Flow<com.example.data.room.GlobalLeaderboards?> =
         globalLeaderboardsRepository.getWorldRecordForTrackFlow(trackId)
+
+    fun getReplaysForTrack(trackId: String): Flow<List<com.example.data.room.ReplayStorage>> =
+        replayStorageRepository.getReplaysForTrackFlow(trackId)
+
+    fun getBestReplayForTrack(trackId: String): Flow<com.example.data.room.ReplayStorage?> =
+        replayStorageRepository.getBestReplayForTrackFlow(trackId)
+
+    fun selectReplayTrack(trackId: String) {
+        replaySelectedTrackId.value = trackId
+    }
+
+    fun openReplayViewer(trackId: String? = null) {
+        if (trackId != null) {
+            replaySelectedTrackId.value = trackId
+        }
+        navigateTo(AppScreen.REPLAY)
+    }
 
     fun claimRoomDailyChallenge(challengeId: String) = repository.claimRoomDailyChallenge(challengeId)
 
@@ -267,16 +288,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             aiRacers.value = emptyList()
         }
 
-        // Initialize Dynamic Weather & Physics Service
-        val initialCondition = com.example.model.WeatherCondition.fromWeatherType(initialWeather)
-        val initialRaceWeather = RaceWeatherCondition.fromWeatherType(initialWeather)
-        com.example.model.WeatherManager.setCondition(initialCondition)
-        dynamicWeatherPhysicsService.reset(initialRaceWeather, enableRandomization = isDynamic)
+        // Initialize WeatherManager: dynamically trigger randomized weather state (Sunny, Rainy, Snowy) at race start
+        val startingCondition = if (isDynamic) {
+            com.example.model.WeatherManager.triggerRandomRaceWeather()
+        } else {
+            val cond = com.example.model.WeatherCondition.fromWeatherType(initialWeather)
+            com.example.model.WeatherManager.setCondition(cond)
+            cond
+        }
+        val startingWeatherType = startingCondition.associatedWeatherType
+        val startingRaceWeather = RaceWeatherCondition.fromWeatherCondition(startingCondition)
+        dynamicWeatherPhysicsService.reset(startingRaceWeather, enableRandomization = isDynamic)
 
+        val visualConditions = com.example.model.WeatherManager.getVisualTrackConditions(startingCondition)
         weatherState.value = DynamicWeatherState(
-            currentWeather = initialWeather,
-            trackWetness = if (initialWeather == WeatherType.SUNNY_CLEAR) 0f else if (initialWeather == WeatherType.LIGHT_RAIN) 0.5f else 0.85f,
-            forecastWeather = initialWeather
+            currentWeather = startingWeatherType,
+            trackWetness = visualConditions.trackWetness,
+            forecastWeather = startingWeatherType,
+            alertMessage = visualConditions.bannerMessage
         )
 
         _currentScreen.value = AppScreen.RACING
@@ -427,7 +456,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 tempRL = pState.tireTempRL,
                                 tempRR = pState.tireTempRR,
                                 gear = pState.currentGear,
-                                downforceN = pState.downforceN
+                                downforceN = pState.downforceN,
+                                frictionDragN = pState.frictionDragForceN,
+                                frictionRollingN = pState.frictionRollingResistanceN,
+                                effectiveGripPct = pState.effectiveTireGrip,
+                                slipAngleDeg = pState.slipAngleDeg,
+                                slipRatio = pState.tireSlipRatio,
+                                frictionCirclePct = pState.frictionCircleUtilizationPct,
+                                vLongMs = pState.localVLong,
+                                vLatMs = pState.localVLat
                             )
                         )
                         _telemetryHistory.value = hist
@@ -883,23 +920,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         com.example.model.WeatherManager.setCondition(condition)
         val raceCond = RaceWeatherCondition.fromWeatherCondition(condition)
         dynamicWeatherPhysicsService.forceWeather(raceCond)
-        val targetWetness = condition.targetTrackWetness
+        val visual = com.example.model.WeatherManager.getVisualTrackConditions(condition)
         weatherState.value = weatherState.value.copy(
             currentWeather = condition.associatedWeatherType,
-            trackWetness = targetWetness,
-            alertMessage = "CONDITIONS: ${condition.displayName.uppercase()}"
+            trackWetness = visual.trackWetness,
+            alertMessage = visual.bannerMessage
         )
     }
 
     fun triggerRandomRaceWeather(): RaceWeatherCondition {
-        val newCond = dynamicWeatherPhysicsService.triggerRandomWeatherChange()
-        com.example.model.WeatherManager.setCondition(newCond.associatedCondition)
+        val chosen = com.example.model.WeatherManager.triggerRandomRaceWeather()
+        val raceCond = RaceWeatherCondition.fromWeatherCondition(chosen)
+        dynamicWeatherPhysicsService.forceWeather(raceCond)
+        val visual = com.example.model.WeatherManager.getVisualTrackConditions(chosen)
         weatherState.value = weatherState.value.copy(
-            currentWeather = newCond.associatedWeatherType,
-            trackWetness = newCond.targetTrackWetness,
-            alertMessage = dynamicWeatherPhysicsService.physicsState.value.alertMessage
+            currentWeather = chosen.associatedWeatherType,
+            trackWetness = visual.trackWetness,
+            alertMessage = visual.bannerMessage
         )
-        return newCond
+        return raceCond
     }
 
     fun toggleAutoRandomWeather(enabled: Boolean) {

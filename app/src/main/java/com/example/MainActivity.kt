@@ -282,7 +282,19 @@ fun RacingApp(viewModel: MainViewModel) {
                                     onViewLeaderboard = { trackId ->
                                         viewModel.selectLeaderboardTrack(trackId)
                                         viewModel.navigateTo(AppScreen.LEADERBOARD)
+                                    },
+                                    onOpenReplayViewer = { trackId ->
+                                        viewModel.openReplayViewer(trackId)
                                     }
+                                )
+                            }
+
+                            AppScreen.REPLAY -> {
+                                val selectedTrackId by viewModel.replaySelectedTrackId.collectAsState()
+                                com.example.ui.components.ReplayViewer(
+                                    initialTrackId = selectedTrackId,
+                                    onClose = { viewModel.navigateTo(AppScreen.TIME_TRIAL) },
+                                    modifier = Modifier.fillMaxSize()
                                 )
                             }
 

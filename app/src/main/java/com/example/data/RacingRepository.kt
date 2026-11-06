@@ -32,8 +32,10 @@ import com.example.data.room.DailyChallenges
 import com.example.data.room.DailyChallengesGenerator
 import com.example.data.room.GlobalLeaderboardsDao
 import com.example.data.room.GlobalLeaderboards
+import com.example.data.room.ReplayStorageDao
 import com.example.data.DailyChallengesRepository
 import com.example.data.GlobalLeaderboardsRepository
+import com.example.data.ReplayStorageRepository
 import com.example.model.TrackRegistry
 import com.example.model.Achievement
 import com.example.model.AchievementRegistry
@@ -92,18 +94,21 @@ class RacingRepository(private val context: Context) {
     val achievementsDao: AchievementsDao = appDb.achievementsDao()
     val dailyChallengesDao: DailyChallengesDao = appDb.dailyChallengesDao()
     val globalLeaderboardsDao: GlobalLeaderboardsDao = appDb.globalLeaderboardsDao()
+    val replayStorageDao: ReplayStorageDao = appDb.replayStorageDao()
     val dataRepository: DataRepository = DataRepository(
         driverProfileDao,
         gameStatisticsDao,
         achievementsDao,
         dailyChallengesDao,
-        globalLeaderboardsDao
+        globalLeaderboardsDao,
+        replayStorageDao
     )
     val driverProfileRepository: DriverProfileRepository = dataRepository.driverProfileRepository
     val gameStatisticsRepository: GameStatisticsRepository = dataRepository.gameStatisticsRepository
     val achievementsRepository: AchievementsRepository = AchievementsRepository(achievementsDao)
     val dailyChallengesRepository: DailyChallengesRepository = DailyChallengesRepository(dailyChallengesDao)
     val globalLeaderboardsRepository: GlobalLeaderboardsRepository = GlobalLeaderboardsRepository(globalLeaderboardsDao)
+    val replayStorageRepository: ReplayStorageRepository = ReplayStorageRepository(replayStorageDao)
     private val repoScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val _profile = MutableStateFlow(loadProfile())
@@ -122,6 +127,9 @@ class RacingRepository(private val context: Context) {
             } catch (ignored: Exception) {}
             try {
                 globalLeaderboardsRepository.ensureDefaultLeaderboards()
+            } catch (ignored: Exception) {}
+            try {
+                replayStorageRepository.ensureDefaultReplays()
             } catch (ignored: Exception) {}
         }
     }
@@ -551,6 +559,17 @@ class RacingRepository(private val context: Context) {
             if (ghostLap != null) {
                 ghostLapsCache[trackId] = ghostLap
                 saveGhostLap(trackId, ghostLap)
+                repoScope.launch {
+                    try {
+                        val track = TrackRegistry.getTrackById(trackId)
+                        replayStorageRepository.saveGhostLapReplay(
+                            ghostLap = ghostLap,
+                            trackName = track.name,
+                            vehicleId = curr.selectedVehicleId,
+                            cleanLap = true
+                        )
+                    } catch (ignored: Exception) {}
+                }
             }
             repoScope.launch {
                 try {

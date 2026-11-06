@@ -25,6 +25,10 @@ import com.example.model.SurfaceHazardType
 import com.example.model.SurfacePatch
 import com.example.model.Track
 import com.example.model.Vehicle
+import com.example.model.VisualTrackConditions
+import com.example.model.WeatherCondition
+import com.example.model.WeatherManager
+import com.example.model.WeatherPrecipitationType
 import com.example.model.WeatherType
 import com.example.physics.AiRacer
 import com.example.physics.CarPhysicsState
@@ -62,7 +66,11 @@ fun GameCanvas(
     particles: List<Particle>,
     skidMarks: List<SkidMark>
 ) {
-    Canvas(modifier = modifier.fillMaxSize().background(GrassGreenColor)) {
+    val visualConditions = remember(currentWeather, trackWetness) {
+        WeatherManager.getVisualTrackConditions(WeatherCondition.fromWeatherType(currentWeather))
+    }
+
+    Canvas(modifier = modifier.fillMaxSize().background(visualConditions.grassRunoffColor)) {
         val canvasWidth = size.width
         val canvasHeight = size.height
 
@@ -80,8 +88,8 @@ fun GameCanvas(
             // Camera position tracking
             translate(left = -playerState.x, top = -playerState.y) {
 
-                // 2. Render Track Asphalt, Kerbs, and Hazards
-                drawTrackSurfaces(track, trackWetness)
+                // 2. Render Track Asphalt, Kerbs, and Hazards influenced by WeatherManager
+                drawTrackSurfaces(track, visualConditions)
 
                 // 3. Render Skid Marks
                 drawSkidMarks(skidMarks)
@@ -125,8 +133,8 @@ fun GameCanvas(
             }
         }
 
-        // 9. Weather Ambient Overlays (Rain Streaks, Mist, Lightning Flash)
-        drawWeatherOverlay(currentWeather, trackWetness, lightningAlpha, canvasWidth, canvasHeight)
+        // 9. Weather Ambient Overlays (Sunlight, Rain Streaks, Mist, Snow Flurries, Lightning)
+        drawWeatherOverlay(visualConditions, currentWeather, trackWetness, lightningAlpha, canvasWidth, canvasHeight)
 
         // 10. Mini-Map in top corner
         drawMiniMap(
@@ -141,11 +149,11 @@ fun GameCanvas(
     }
 }
 
-private fun DrawScope.drawTrackSurfaces(track: Track, wetness: Float) {
+private fun DrawScope.drawTrackSurfaces(track: Track, visual: VisualTrackConditions) {
     val waypoints = track.waypoints
     if (waypoints.isEmpty()) return
 
-    val asphaltColor = if (wetness > 0.3f) AsphaltWetColor else AsphaltColor
+    val asphaltColor = visual.asphaltColor
 
     // Outer gravel border for extra runoff detail
     val gravelPath = Path()
@@ -162,17 +170,35 @@ private fun DrawScope.drawTrackSurfaces(track: Track, wetness: Float) {
     }
     asphaltPath.close()
 
-    // Draw asphalt base ribbon
+    // Frosted snow margin when snowy weather is active
+    if (visual.snowEdgeAccumulation > 0f) {
+        drawPath(
+            path = asphaltPath,
+            color = Color(0x88B2EBF2),
+            style = Stroke(width = waypoints[0].width + 16f)
+        )
+    }
+
+    // Draw asphalt base ribbon modulated by WeatherManager
     drawPath(
         path = asphaltPath,
         color = asphaltColor,
         style = Stroke(width = waypoints[0].width)
     )
 
+    // Wet specular surface sheen when rain or wetness is present
+    if (visual.asphaltWetnessSheen > 0f) {
+        drawPath(
+            path = asphaltPath,
+            color = Color.White.copy(alpha = 0.08f * visual.asphaltWetnessSheen),
+            style = Stroke(width = waypoints[0].width * 0.75f)
+        )
+    }
+
     // Inner & Outer track edge lines
     drawPath(
         path = asphaltPath,
-        color = Color(0xFFE0E0E0),
+        color = visual.trackBorderColor,
         style = Stroke(width = 3.5f)
     )
 
@@ -441,13 +467,37 @@ private fun DrawScope.drawParticles(particles: List<Particle>) {
 }
 
 private fun DrawScope.drawWeatherOverlay(
+    visual: VisualTrackConditions,
     weather: WeatherType,
     wetness: Float,
     lightningAlpha: Float,
     w: Float,
     h: Float
 ) {
-    // Lightning flash overlay
+    // 1. Ambient atmospheric lighting wash
+    if (visual.ambientOverlayAlpha > 0.01f) {
+        drawRect(
+            color = visual.ambientOverlayColor.copy(alpha = visual.ambientOverlayAlpha),
+            topLeft = Offset.Zero,
+            size = Size(w, h)
+        )
+    }
+
+    // 2. Sunny weather sunbeam / lens flare
+    if (visual.condition.isSunny) {
+        drawCircle(
+            color = Color(0x33FFE082),
+            radius = 110f,
+            center = Offset(w - 50f, 50f)
+        )
+        drawCircle(
+            color = Color(0x1AFFF9C4),
+            radius = 200f,
+            center = Offset(w - 50f, 50f)
+        )
+    }
+
+    // 3. Lightning flash overlay
     if (lightningAlpha > 0.01f) {
         drawRect(
             color = Color.White.copy(alpha = lightningAlpha.coerceIn(0f, 0.7f)),
@@ -456,10 +506,11 @@ private fun DrawScope.drawWeatherOverlay(
         )
     }
 
-    // Rain streaks simulation
-    if (weather == WeatherType.LIGHT_RAIN || weather == WeatherType.THUNDERSTORM) {
-        val count = if (weather == WeatherType.THUNDERSTORM) 70 else 35
-        val streakColor = Color(0x66B0BEC5)
+    // 4. Rain streaks simulation
+    if (visual.precipitationType == WeatherPrecipitationType.RAIN_STREAKS ||
+        weather == WeatherType.LIGHT_RAIN || weather == WeatherType.THUNDERSTORM) {
+        val count = if (weather == WeatherType.THUNDERSTORM) 75 else visual.precipitationParticleCount.coerceAtLeast(35)
+        val streakColor = Color(0x77B0BEC5)
         for (i in 0 until count) {
             val rx = (i * 37f + (System.currentTimeMillis() % 1000) * 1.8f) % w
             val ry = (i * 61f + (System.currentTimeMillis() % 800) * 2.2f) % h
@@ -467,12 +518,12 @@ private fun DrawScope.drawWeatherOverlay(
                 color = streakColor,
                 start = Offset(rx, ry),
                 end = Offset(rx - 8f, ry + 22f),
-                strokeWidth = 1.8f
+                strokeWidth = 2.0f
             )
         }
     }
 
-    // Mountain mist / fog layer
+    // 5. Mountain mist / fog layer
     if (weather == WeatherType.FOG_MIST) {
         drawRect(
             color = Color(0x55ECEFF1),
@@ -481,15 +532,16 @@ private fun DrawScope.drawWeatherOverlay(
         )
     }
 
-    // Snow flakes & frost layer
-    if (weather == WeatherType.FREEZING_ICE) {
-        val count = 50
+    // 6. Snow flurries & frost layer
+    if (visual.precipitationType == WeatherPrecipitationType.SNOW_FLURRIES ||
+        weather == WeatherType.FREEZING_ICE) {
+        val count = visual.precipitationParticleCount.coerceAtLeast(50)
         for (i in 0 until count) {
             val sx = (i * 43f + (System.currentTimeMillis() % 2400) * 0.7f) % w
             val sy = (i * 59f + (System.currentTimeMillis() % 1800) * 1.2f) % h
             drawCircle(
-                color = Color.White.copy(alpha = 0.85f),
-                radius = 2.2f + (i % 3) * 1.1f,
+                color = Color.White.copy(alpha = 0.88f),
+                radius = 2.2f + (i % 3) * 1.2f,
                 center = Offset(sx, sy)
             )
         }

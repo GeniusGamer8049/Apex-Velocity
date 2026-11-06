@@ -11,9 +11,10 @@ import androidx.room.RoomDatabase
         GameStatistics::class,
         Achievements::class,
         DailyChallenges::class,
-        GlobalLeaderboards::class
+        GlobalLeaderboards::class,
+        ReplayStorage::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -26,6 +27,8 @@ abstract class AppDatabase : RoomDatabase() {
     fun dailyChallengeDao(): DailyChallengesDao = dailyChallengesDao()
     abstract fun globalLeaderboardsDao(): GlobalLeaderboardsDao
     fun globalLeaderboardDao(): GlobalLeaderboardsDao = globalLeaderboardsDao()
+    abstract fun replayStorageDao(): ReplayStorageDao
+    fun replayDao(): ReplayStorageDao = replayStorageDao()
 
     companion object {
         @Volatile

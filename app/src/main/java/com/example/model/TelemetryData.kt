@@ -13,8 +13,20 @@ data class TelemetryPoint(
     val tempRL: Float,
     val tempRR: Float,
     val gear: Int,
-    val downforceN: Float
+    val downforceN: Float,
+    // Real-time Physics Integration Variables
+    val frictionDragN: Float = 0f,
+    val frictionRollingN: Float = 0f,
+    val effectiveGripPct: Float = 1.0f,
+    val slipAngleDeg: Float = 0f,
+    val slipRatio: Float = 0f,
+    val frictionCirclePct: Float = 0f,
+    val vLongMs: Float = 0f,
+    val vLatMs: Float = 0f
 ) {
     val avgTireTemp: Float
         get() = (tempFL + tempFR + tempRL + tempRR) / 4f
+
+    val totalFrictionN: Float
+        get() = frictionDragN + frictionRollingN
 }

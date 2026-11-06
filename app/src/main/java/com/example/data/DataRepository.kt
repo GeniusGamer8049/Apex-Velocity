@@ -12,6 +12,8 @@ import com.example.data.room.DailyChallenges
 import com.example.data.room.DailyChallengesDao
 import com.example.data.room.GlobalLeaderboards
 import com.example.data.room.GlobalLeaderboardsDao
+import com.example.data.room.ReplayStorage
+import com.example.data.room.ReplayStorageDao
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -28,6 +30,7 @@ class DataRepository(
     val achievementsDao: AchievementsDao? = null,
     val dailyChallengesDao: DailyChallengesDao? = null,
     val globalLeaderboardsDao: GlobalLeaderboardsDao? = null,
+    val replayStorageDao: ReplayStorageDao? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) {
 
@@ -36,7 +39,8 @@ class DataRepository(
         gameStatisticsDao = AppDatabase.getDatabase(context).gameStatisticsDao(),
         achievementsDao = AppDatabase.getDatabase(context).achievementsDao(),
         dailyChallengesDao = AppDatabase.getDatabase(context).dailyChallengesDao(),
-        globalLeaderboardsDao = AppDatabase.getDatabase(context).globalLeaderboardsDao()
+        globalLeaderboardsDao = AppDatabase.getDatabase(context).globalLeaderboardsDao(),
+        replayStorageDao = AppDatabase.getDatabase(context).replayStorageDao()
     )
 
     val driverProfileRepository = DriverProfileRepository(driverProfileDao, ioDispatcher)
@@ -44,6 +48,7 @@ class DataRepository(
     val achievementsRepository = achievementsDao?.let { AchievementsRepository(it, ioDispatcher) }
     val dailyChallengesRepository = dailyChallengesDao?.let { DailyChallengesRepository(it, ioDispatcher) }
     val globalLeaderboardsRepository = globalLeaderboardsDao?.let { GlobalLeaderboardsRepository(it, ioDispatcher) }
+    val replayStorageRepository = replayStorageDao?.let { ReplayStorageRepository(it, ioDispatcher) }
 
     // ========================================================================
     // Driver Profile APIs

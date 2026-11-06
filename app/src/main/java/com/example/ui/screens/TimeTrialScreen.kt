@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -67,7 +69,8 @@ fun TimeTrialScreen(
     profile: PlayerProfile,
     ghostLapProvider: (String) -> GhostLap?,
     onStartTimeTrial: (track: Track, weather: WeatherType, enableGhost: Boolean) -> Unit,
-    onViewLeaderboard: ((trackId: String) -> Unit)? = null
+    onViewLeaderboard: ((trackId: String) -> Unit)? = null,
+    onOpenReplayViewer: (trackId: String) -> Unit = {}
 ) {
     var selectedTrackId by remember { mutableStateOf("monaco_riviera") }
     var selectedWeather by remember { mutableStateOf(WeatherType.SUNNY_CLEAR) }
@@ -208,6 +211,25 @@ fun TimeTrialScreen(
                             enabled = ghostLap != null,
                             colors = SwitchDefaults.colors(checkedThumbColor = CarbonBlack, checkedTrackColor = ApexCyan)
                         )
+                    }
+
+                    // Button to launch the 2D ReplayViewer Visualizer
+                    Button(
+                        onClick = { onOpenReplayViewer(selectedTrackId) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("open_replay_viewer_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DarkSurfaceElevated,
+                            contentColor = ApexCyan
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, ApexCyan.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("VISUALIZE REPLAY & GHOST PATH", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
             }
