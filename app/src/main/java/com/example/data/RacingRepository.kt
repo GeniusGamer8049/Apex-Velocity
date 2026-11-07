@@ -33,6 +33,8 @@ import com.example.data.room.DailyChallengesGenerator
 import com.example.data.room.GlobalLeaderboardsDao
 import com.example.data.room.GlobalLeaderboards
 import com.example.data.room.ReplayStorageDao
+import com.example.data.room.CareerProgressDao
+import com.example.data.room.TimeTrialRecordDao
 import com.example.data.DailyChallengesRepository
 import com.example.data.GlobalLeaderboardsRepository
 import com.example.data.ReplayStorageRepository
@@ -95,13 +97,19 @@ class RacingRepository(private val context: Context) {
     val dailyChallengesDao: DailyChallengesDao = appDb.dailyChallengesDao()
     val globalLeaderboardsDao: GlobalLeaderboardsDao = appDb.globalLeaderboardsDao()
     val replayStorageDao: ReplayStorageDao = appDb.replayStorageDao()
+    val careerProgressDao: CareerProgressDao = appDb.careerProgressDao()
+    val careerManager: CareerManager = CareerManager(careerProgressDao)
+    val timeTrialRecordDao: TimeTrialRecordDao = appDb.timeTrialRecordDao()
+    val leaderboardManager: LeaderboardManager = LeaderboardManager(timeTrialRecordDao)
     val dataRepository: DataRepository = DataRepository(
-        driverProfileDao,
-        gameStatisticsDao,
-        achievementsDao,
-        dailyChallengesDao,
-        globalLeaderboardsDao,
-        replayStorageDao
+        driverProfileDao = driverProfileDao,
+        gameStatisticsDao = gameStatisticsDao,
+        achievementsDao = achievementsDao,
+        dailyChallengesDao = dailyChallengesDao,
+        globalLeaderboardsDao = globalLeaderboardsDao,
+        replayStorageDao = replayStorageDao,
+        careerProgressDao = careerProgressDao,
+        timeTrialRecordDao = timeTrialRecordDao
     )
     val driverProfileRepository: DriverProfileRepository = dataRepository.driverProfileRepository
     val gameStatisticsRepository: GameStatisticsRepository = dataRepository.gameStatisticsRepository
@@ -130,6 +138,12 @@ class RacingRepository(private val context: Context) {
             } catch (ignored: Exception) {}
             try {
                 replayStorageRepository.ensureDefaultReplays()
+            } catch (ignored: Exception) {}
+            try {
+                careerManager.getCareerProgress()
+            } catch (ignored: Exception) {}
+            try {
+                leaderboardManager.ensureDefaultRecords()
             } catch (ignored: Exception) {}
         }
     }
@@ -583,6 +597,14 @@ class RacingRepository(private val context: Context) {
                         countryCode = curr.driverCountry,
                         vehicleName = vehicleName,
                         vehicleCategory = vehicleCat
+                    )
+                    leaderboardManager.recordTimeTrialCompletion(
+                        trackId = trackId,
+                        trackName = track.name,
+                        playerName = curr.driverName,
+                        vehicleUsed = vehicleName,
+                        completionTimeMs = lapTimeMs,
+                        cleanLap = true
                     )
                 } catch (ignored: Exception) {}
             }

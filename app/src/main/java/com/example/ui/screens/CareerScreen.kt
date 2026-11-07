@@ -31,11 +31,17 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.TrendingUp
+import com.example.data.CareerManager
+import com.example.data.room.CareerProgress
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -80,12 +86,42 @@ import com.example.ui.dialogs.BadgePill
 @Composable
 fun CareerScreen(
     profile: PlayerProfile,
+    careerProgress: CareerProgress? = null,
+    careerManager: CareerManager? = null,
     onStartCareerRace: (CareerRaceEvent) -> Unit,
     onClaimChallenge: (String) -> Unit,
     onClaimAllBonus: () -> Unit,
     onOpenAchievements: () -> Unit = {},
     onOpenDriverProfile: () -> Unit = {}
 ) {
+    val activeProgress = careerProgress ?: CareerProgress.defaultProgression()
+    val levelProgress = remember(activeProgress.experiencePoints) {
+        val level = run {
+            var lvl = 1
+            for (i in CareerManager.LEVEL_THRESHOLDS.indices.reversed()) {
+                if (activeProgress.experiencePoints >= CareerManager.LEVEL_THRESHOLDS[i]) {
+                    lvl = i + 1
+                    break
+                }
+            }
+            lvl
+        }
+        val currentThresh = CareerManager.LEVEL_THRESHOLDS[(level - 1).coerceIn(0, CareerManager.LEVEL_THRESHOLDS.size - 1)]
+        val nextThresh = if (level < CareerManager.LEVEL_THRESHOLDS.size) CareerManager.LEVEL_THRESHOLDS[level] else currentThresh
+        val span = (nextThresh - currentThresh).coerceAtLeast(1)
+        val curXp = (activeProgress.experiencePoints - currentThresh).coerceIn(0, span)
+        val pct = if (level >= CareerManager.LEVEL_THRESHOLDS.size) 1.0f else (curXp.toFloat() / span.toFloat()).coerceIn(0f, 1f)
+        val title = CareerManager.LEVEL_TITLES[(level - 1).coerceIn(0, CareerManager.LEVEL_TITLES.size - 1)]
+        com.example.data.LevelProgress(
+            currentLevel = level,
+            currentLevelTitle = title,
+            currentLevelXp = curXp,
+            xpRequiredForNextLevel = span,
+            progressPercentage = pct,
+            isMaxLevel = level >= CareerManager.LEVEL_THRESHOLDS.size
+        )
+    }
+
     val tiers = remember { CareerRegistry.createDefaultTiers() }
     var selectedTierIndex by remember { mutableIntStateOf(0) }
     val currentTier = tiers[selectedTierIndex]
@@ -243,6 +279,217 @@ fun CareerScreen(
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Black
                                 )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Driver Level & Career Progression Room Card
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, ApexGold.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                    .testTag("career_progression_card"),
+                colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // Header with Driver Level & Total XP
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(ApexGold.copy(alpha = 0.2f))
+                                    .border(1.dp, ApexGold, RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "LVL ${levelProgress.currentLevel}",
+                                    color = ApexGold,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = levelProgress.currentLevelTitle,
+                                    color = TextWhite,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (levelProgress.isMaxLevel) "MAX DRIVER RANK REACHED"
+                                    else "${levelProgress.currentLevelXp} / ${levelProgress.xpRequiredForNextLevel} XP to Level ${levelProgress.currentLevel + 1}",
+                                    color = ApexCyan,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(CarbonBlack.copy(alpha = 0.8f))
+                                .border(1.dp, SurfaceBorder, RoundedCornerShape(12.dp))
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(Icons.Default.TrendingUp, contentDescription = null, tint = ApexCyan, modifier = Modifier.size(14.dp))
+                                Text(
+                                    text = "${activeProgress.experiencePoints} XP",
+                                    color = TextWhite,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                    }
+
+                    // Level XP Progress Bar
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        LinearProgressIndicator(
+                            progress = { levelProgress.progressPercentage },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp)),
+                            color = ApexGold,
+                            trackColor = CarbonBlack
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Progression: ${(levelProgress.progressPercentage * 100).toInt()}%",
+                                color = TextMuted,
+                                fontSize = 10.sp
+                            )
+                            Text(
+                                text = if (levelProgress.isMaxLevel) "APEX LEGEND" else "Next: Level ${levelProgress.currentLevel + 1}",
+                                color = ApexGold,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    // 4 Career Quick Statistics
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(DarkSurface)
+                            .padding(vertical = 10.dp, horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceAround
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("TROPHIES", color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text("🏆 ${activeProgress.trophyCount}", color = ApexGold, fontSize = 13.sp, fontWeight = FontWeight.Black)
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("RACES", color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text("🏁 ${activeProgress.totalRacesFinished}", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Black)
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("WINS", color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text("🥇 ${activeProgress.totalWins}", color = ApexGreen, fontSize = 13.sp, fontWeight = FontWeight.Black)
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("PODIUMS", color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text("🥈 ${activeProgress.totalPodiums}", color = ApexCyan, fontSize = 13.sp, fontWeight = FontWeight.Black)
+                        }
+                    }
+
+                    // Track & Vehicle Progression Tiers Status Badges
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "CIRCUITS & VEHICLE TIERS UNLOCKED",
+                            color = TextMuted,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val unlockedTracks = activeProgress.getTrackIdList()
+                            val tracks = listOf(
+                                "monaco_riviera" to "Monaco",
+                                "apex_speedway" to "Apex GP",
+                                "neon_tokyo" to "Tokyo",
+                                "mount_akina" to "Akina"
+                            )
+                            for ((trackId, label) in tracks) {
+                                val isUnlocked = unlockedTracks.contains(trackId)
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (isUnlocked) ApexGreen.copy(alpha = 0.15f) else CarbonBlack)
+                                        .border(
+                                            1.dp,
+                                            if (isUnlocked) ApexGreen.copy(alpha = 0.7f) else SurfaceBorder,
+                                            RoundedCornerShape(6.dp)
+                                        )
+                                        .padding(vertical = 4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = if (isUnlocked) "✓ $label" else "🔒 $label",
+                                        color = if (isUnlocked) ApexGreen else TextMuted,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+
+                        // Vehicle Progression Tiers Badges
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val unlockedTiers = activeProgress.getTierIdList()
+                            val tierBadges = listOf(
+                                "tier_1" to "T1 Clubman",
+                                "tier_2" to "T2 Pro-Am",
+                                "tier_3" to "T3 Supercar",
+                                "tier_4" to "T4 World GP"
+                            )
+                            for ((tierId, label) in tierBadges) {
+                                val isUnlocked = unlockedTiers.contains(tierId)
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (isUnlocked) ApexCyan.copy(alpha = 0.15f) else CarbonBlack)
+                                        .border(
+                                            1.dp,
+                                            if (isUnlocked) ApexCyan.copy(alpha = 0.7f) else SurfaceBorder,
+                                            RoundedCornerShape(6.dp)
+                                        )
+                                        .padding(vertical = 4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = if (isUnlocked) "★ $label" else "🔒 $label",
+                                        color = if (isUnlocked) ApexCyan else TextMuted,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }

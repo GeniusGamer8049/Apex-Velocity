@@ -65,4 +65,7 @@ interface AchievementsDao {
 
     @Query("UPDATE achievements SET currentProgress = :progress, isUnlocked = CASE WHEN :progress >= targetProgress THEN 1 ELSE isUnlocked END, unlockedTimestamp = CASE WHEN :progress >= targetProgress AND unlockedTimestamp IS NULL THEN :timestamp ELSE unlockedTimestamp END WHERE id = :id")
     suspend fun updateProgress(id: String, progress: Float, timestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE achievements SET isRewardClaimed = 1 WHERE id = :id")
+    suspend fun markRewardClaimed(id: String)
 }

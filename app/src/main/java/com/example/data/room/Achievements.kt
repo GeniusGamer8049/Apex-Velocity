@@ -22,7 +22,8 @@ data class Achievements(
     val rewardCredits: Int = 1000,
     val rewardRep: Int = 100,
     val iconName: String = "trophy",
-    val unlockedTimestamp: Long? = null
+    val unlockedTimestamp: Long? = null,
+    val isRewardClaimed: Boolean = false
 ) {
     val progressFraction: Float
         @Ignore get() = (currentProgress / targetProgress.coerceAtLeast(1f)).coerceIn(0f, 1f)
@@ -42,6 +43,7 @@ object DefaultAchievements {
     const val ID_CLEAN_LAP = "clean_lap"
     const val ID_PODIUM_MASTER = "podium_master"
     const val ID_SPEED_DEMON = "speed_demon"
+    const val ID_SPEED_SUPERSONIC = "speed_supersonic"
     const val ID_DRIFT_KING = "drift_king"
     const val ID_WET_RACER = "wet_racer"
     const val ID_TUNING_PRO = "tuning_pro"
@@ -105,6 +107,18 @@ object DefaultAchievements {
             unit = "km/h",
             rewardCredits = 8000,
             rewardRep = 300,
+            iconName = "speed"
+        ),
+        Achievements(
+            id = ID_SPEED_SUPERSONIC,
+            title = "Supersonic Velocity",
+            description = "Achieve a scorching top speed of 300 km/h or higher.",
+            category = "Speed",
+            targetProgress = 300f,
+            currentProgress = 0f,
+            unit = "km/h",
+            rewardCredits = 12000,
+            rewardRep = 450,
             iconName = "speed"
         ),
         Achievements(

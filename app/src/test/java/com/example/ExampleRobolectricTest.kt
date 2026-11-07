@@ -15,6 +15,7 @@ import com.example.model.VehicleUpgrades
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -2459,6 +2460,346 @@ class ExampleRobolectricTest {
         assertEquals(com.example.model.WeatherPrecipitationType.SNOW_FLURRIES, snowVisual.precipitationType)
         assertEquals(0.90f, snowVisual.trackWetness, 0.01f)
         assertTrue("Snow edge accumulation is active along track margins", snowVisual.snowEdgeAccumulation > 0.5f)
+    }
+
+    @Test
+    fun `test Room CareerProgressDao insertion, retrieval, and updating`(): Unit = kotlinx.coroutines.runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = com.example.data.room.AppDatabase.getDatabase(context)
+        val careerDao = db.careerProgressDao()
+
+        // Clean previous test data
+        careerDao.deleteCareerProgress("test_driver_1")
+
+        val initial = com.example.data.room.CareerProgress(
+            driverId = "test_driver_1",
+            experiencePoints = 150,
+            driverLevel = 1,
+            unlockedTrackIds = "monaco_riviera,apex_speedway",
+            unlockedTierIds = "tier_1",
+            currentTierId = "tier_1",
+            unlockedVehicleIds = "apex_gt86",
+            completedEventIds = "event_1_1",
+            trophyCount = 0,
+            totalRacesFinished = 1,
+            totalWins = 1,
+            totalPodiums = 1
+        )
+        careerDao.insertOrUpdate(initial)
+
+        val retrieved = careerDao.getCareerProgress("test_driver_1")
+        assertNotNull(retrieved)
+        assertEquals("test_driver_1", retrieved!!.driverId)
+        assertEquals(150, retrieved.experiencePoints)
+        assertEquals(1, retrieved.driverLevel)
+        assertEquals(listOf("monaco_riviera", "apex_speedway"), retrieved.getTrackIdList())
+        assertEquals(listOf("tier_1"), retrieved.getTierIdList())
+        assertEquals(listOf("apex_gt86"), retrieved.getVehicleIdList())
+        assertEquals(listOf("event_1_1"), retrieved.getCompletedEventIdList())
+
+        // Update experience and level
+        careerDao.updateExperienceAndLevel("test_driver_1", xp = 450, level = 2)
+        val afterUpdate = careerDao.getCareerProgress("test_driver_1")
+        assertNotNull(afterUpdate)
+        assertEquals(450, afterUpdate!!.experiencePoints)
+        assertEquals(2, afterUpdate.driverLevel)
+
+        // Update unlocked tracks
+        careerDao.updateUnlockedTracks("test_driver_1", "monaco_riviera,apex_speedway,neon_tokyo")
+        val afterTrackUpdate = careerDao.getCareerProgress("test_driver_1")
+        assertEquals(3, afterTrackUpdate!!.getTrackIdList().size)
+        assertTrue(afterTrackUpdate.getTrackIdList().contains("neon_tokyo"))
+
+        // Cleanup
+        careerDao.deleteCareerProgress("test_driver_1")
+        assertNull(careerDao.getCareerProgress("test_driver_1"))
+    }
+
+    @Test
+    fun `test CareerManager XP calculation formulas and level progressions`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val careerManager = com.example.data.CareerManager(context)
+
+        // 1st place with clean race, drift bonus, and podium bonus
+        val p1Xp = careerManager.calculateXpGain(position = 1, isClean = true, driftScore = 750)
+        assertEquals(250, p1Xp.baseXp)
+        assertEquals(50, p1Xp.cleanRaceBonus)
+        assertEquals(30, p1Xp.driftBonus)
+        assertEquals(40, p1Xp.podiumBonus)
+        assertEquals(370, p1Xp.totalXp)
+
+        // 2nd place with podium bonus only
+        val p2Xp = careerManager.calculateXpGain(position = 2, isClean = false, driftScore = 120)
+        assertEquals(175, p2Xp.baseXp)
+        assertEquals(0, p2Xp.cleanRaceBonus)
+        assertEquals(0, p2Xp.driftBonus)
+        assertEquals(40, p2Xp.podiumBonus)
+        assertEquals(215, p2Xp.totalXp)
+
+        // 3rd place with clean race bonus
+        val p3Xp = careerManager.calculateXpGain(position = 3, isClean = true, driftScore = 0)
+        assertEquals(120, p3Xp.baseXp)
+        assertEquals(50, p3Xp.cleanRaceBonus)
+        assertEquals(0, p3Xp.driftBonus)
+        assertEquals(40, p3Xp.podiumBonus)
+        assertEquals(210, p3Xp.totalXp)
+
+        // 4th place without bonuses
+        val p4Xp = careerManager.calculateXpGain(position = 4, isClean = false, driftScore = 0)
+        assertEquals(60, p4Xp.baseXp)
+        assertEquals(0, p4Xp.cleanRaceBonus)
+        assertEquals(0, p4Xp.driftBonus)
+        assertEquals(0, p4Xp.podiumBonus)
+        assertEquals(60, p4Xp.totalXp)
+
+        // Level threshold progression assertions
+        assertEquals(1, careerManager.getLevelForXp(0))
+        assertEquals(1, careerManager.getLevelForXp(299))
+        assertEquals(2, careerManager.getLevelForXp(300))
+        assertEquals(2, careerManager.getLevelForXp(699))
+        assertEquals(3, careerManager.getLevelForXp(700))
+        assertEquals(4, careerManager.getLevelForXp(1200))
+        assertEquals(5, careerManager.getLevelForXp(1800))
+        assertEquals(10, careerManager.getLevelForXp(7000))
+
+        // Level progress bar breakdown
+        val progLevel2 = careerManager.getLevelProgress(450)
+        assertEquals(2, progLevel2.currentLevel)
+        assertEquals("Clubman Racer", progLevel2.currentLevelTitle)
+        assertEquals(150, progLevel2.currentLevelXp) // 450 - 300
+        assertEquals(400, progLevel2.xpRequiredForNextLevel) // 700 - 300
+        assertFalse(progLevel2.isMaxLevel)
+        assertEquals(0.375f, progLevel2.progressPercentage, 0.01f)
+    }
+
+    @Test
+    fun `test CareerManager processRaceResult end-to-end with level up, track and tier unlocks in Room`(): Unit = kotlinx.coroutines.runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val careerManager = com.example.data.CareerManager(context)
+        val testDriver = "test_driver_progression"
+
+        // Initialize driver to clean state
+        careerManager.careerProgressDao.deleteCareerProgress(testDriver)
+        val initial = com.example.data.room.CareerProgress.defaultProgression().copy(driverId = testDriver)
+        careerManager.careerProgressDao.insertOrUpdate(initial)
+
+        // Verify initial state
+        assertFalse(careerManager.isTrackUnlocked("neon_tokyo", testDriver))
+        assertFalse(careerManager.isTrackUnlocked("mount_akina", testDriver))
+        assertFalse(careerManager.isTierUnlocked("tier_2", testDriver))
+        assertFalse(careerManager.isVehicleUnlocked("silvia_s15", testDriver))
+
+        // Race 1: P1 Victory, clean, high drift -> +370 XP (crosses 300 XP threshold for Level 2)
+        val result1 = careerManager.processRaceResult(
+            position = 1,
+            totalRacers = 4,
+            trackId = "monaco_riviera",
+            isClean = true,
+            driftScore = 650,
+            careerEventId = "event_1_1",
+            driverId = testDriver
+        )
+
+        assertEquals(370, result1.xpGained)
+        assertEquals(370, result1.newTotalXp)
+        assertEquals(1, result1.previousLevel)
+        assertEquals(2, result1.newLevel)
+        assertTrue(result1.didLevelUp)
+
+        // Check newly unlocked items
+        assertTrue("neon_tokyo should be newly unlocked at Level 2", result1.newlyUnlockedTracks.contains("neon_tokyo"))
+        assertTrue("tier_2 should be newly unlocked at Level 2", result1.newlyUnlockedTiers.contains("tier_2"))
+        assertTrue("silvia_s15 should be newly unlocked at Level 2", result1.newlyUnlockedVehicles.contains("silvia_s15"))
+        assertTrue("evo_rally should be newly unlocked at Level 2", result1.newlyUnlockedVehicles.contains("evo_rally"))
+
+        // Check query methods with Room persistence
+        assertTrue(careerManager.isTrackUnlocked("monaco_riviera", testDriver))
+        assertTrue(careerManager.isTrackUnlocked("apex_speedway", testDriver))
+        assertTrue(careerManager.isTrackUnlocked("neon_tokyo", testDriver))
+        assertTrue(careerManager.isTierUnlocked("tier_2", testDriver))
+        assertTrue(careerManager.isVehicleUnlocked("silvia_s15", testDriver))
+        assertTrue(careerManager.isVehicleUnlocked("evo_rally", testDriver))
+        assertFalse("mount_akina requires Level 3", careerManager.isTrackUnlocked("mount_akina", testDriver))
+
+        // Race 2: P1 Victory, clean, high drift -> +370 XP again (Total 740 XP -> crosses 700 threshold for Level 3)
+        val result2 = careerManager.processRaceResult(
+            position = 1,
+            totalRacers = 4,
+            trackId = "apex_speedway",
+            isClean = true,
+            driftScore = 600,
+            careerEventId = "event_1_2", // All tier_1 events now complete!
+            driverId = testDriver
+        )
+
+        assertEquals(740, result2.newTotalXp)
+        assertEquals(3, result2.newLevel)
+        assertTrue(result2.didLevelUp)
+        assertTrue("mount_akina should be newly unlocked at Level 3", result2.newlyUnlockedTracks.contains("mount_akina"))
+        assertTrue("tier_3 should be newly unlocked at Level 3", result2.newlyUnlockedTiers.contains("tier_3"))
+        assertTrue("viper_gt should be newly unlocked at Level 3", result2.newlyUnlockedVehicles.contains("viper_gt"))
+        assertEquals("Clubman Bronze Cup", result2.newTrophyEarned)
+        assertEquals(1, result2.updatedProgress.trophyCount)
+
+        // Final query check
+        assertTrue(careerManager.isTrackUnlocked("mount_akina", testDriver))
+        assertTrue(careerManager.isTierUnlocked("tier_3", testDriver))
+        assertTrue(careerManager.isVehicleUnlocked("viper_gt", testDriver))
+
+        // Cleanup
+        careerManager.careerProgressDao.deleteCareerProgress(testDriver)
+    }
+
+    @Test
+    fun `test Room TimeTrialRecordDao insertion, retrieval, and sorting by completion time`(): Unit = kotlinx.coroutines.runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = com.example.data.room.AppDatabase.getDatabase(context)
+        val dao = db.timeTrialRecordDao()
+
+        val trackId = "test_circuit_track"
+        dao.deleteRecordsForTrack(trackId)
+
+        val r1 = com.example.data.room.TimeTrialRecord(
+            id = "test_tt_1",
+            trackId = trackId,
+            trackName = "Test Circuit",
+            playerName = "Racer Alpha",
+            vehicleUsed = "Apex GT-86 Coupe",
+            completionTimeMs = 58200L,
+            rank = 2
+        )
+        val r2 = com.example.data.room.TimeTrialRecord(
+            id = "test_tt_2",
+            trackId = trackId,
+            trackName = "Test Circuit",
+            playerName = "Racer Beta",
+            vehicleUsed = "Veneno Hyper GT",
+            completionTimeMs = 54100L,
+            rank = 1
+        )
+        val r3 = com.example.data.room.TimeTrialRecord(
+            id = "test_tt_3",
+            trackId = trackId,
+            trackName = "Test Circuit",
+            playerName = "Racer Gamma",
+            vehicleUsed = "Viper GTS V10",
+            completionTimeMs = 61400L,
+            rank = 3
+        )
+
+        dao.insertRecords(listOf(r1, r2, r3))
+
+        val topRecords = dao.getTopRecordsForTrack(trackId, limit = 10)
+        assertEquals(3, topRecords.size)
+
+        // Verifying sorting by completion time ascending (fastest first)
+        assertEquals("Racer Beta", topRecords[0].playerName)
+        assertEquals("Veneno Hyper GT", topRecords[0].vehicleUsed)
+        assertEquals(54100L, topRecords[0].completionTimeMs)
+
+        assertEquals("Racer Alpha", topRecords[1].playerName)
+        assertEquals("Apex GT-86 Coupe", topRecords[1].vehicleUsed)
+        assertEquals(58200L, topRecords[1].completionTimeMs)
+
+        assertEquals("Racer Gamma", topRecords[2].playerName)
+        assertEquals("Viper GTS V10", topRecords[2].vehicleUsed)
+        assertEquals(61400L, topRecords[2].completionTimeMs)
+
+        // Best record query
+        val best = dao.getTrackRecord(trackId)
+        assertNotNull(best)
+        assertEquals("Racer Beta", best!!.playerName)
+        assertEquals(54100L, best.completionTimeMs)
+
+        // Formatted time check
+        assertEquals("00:54.100", best.formattedCompletionTime)
+
+        // Cleanup
+        dao.deleteRecordsForTrack(trackId)
+        assertTrue(dao.getTopRecordsForTrack(trackId).isEmpty())
+    }
+
+    @Test
+    fun `test LeaderboardManager stores top time trial records and recalculates rankings`(): Unit = kotlinx.coroutines.runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val leaderboardManager = com.example.data.LeaderboardManager(context)
+        val trackId = "monaco_riviera"
+
+        // Ensure default records seeded
+        leaderboardManager.ensureDefaultRecords()
+
+        val initialTop = leaderboardManager.getTopRecordsForTrack(trackId, limit = 5)
+        assertTrue(initialTop.isNotEmpty())
+        assertEquals(1, initialTop.first().rank)
+        assertNotNull(initialTop.first().playerName)
+        assertNotNull(initialTop.first().vehicleUsed)
+        assertTrue(initialTop.first().completionTimeMs > 0)
+
+        // Record a new fast time trial run by player
+        val testPlayer = "Apex Pilot Test"
+        val testCar = "Silvia S15 Spec-R"
+        val testTimeMs = 52800L // Slower than 52410 (Rank 1), faster than 53120 (Rank 2) -> should place #2
+
+        val result = leaderboardManager.recordTimeTrialCompletion(
+            trackId = trackId,
+            trackName = "Monaco Riviera Grand Prix",
+            playerName = testPlayer,
+            vehicleUsed = testCar,
+            completionTimeMs = testTimeMs,
+            cleanLap = true,
+            weatherCondition = "CLEAR"
+        )
+
+        assertNotNull(result.record)
+        assertEquals(testPlayer, result.record.playerName)
+        assertEquals(testCar, result.record.vehicleUsed)
+        assertEquals(testTimeMs, result.record.completionTimeMs)
+        assertEquals(2, result.newRank)
+        assertTrue(result.isNewPersonalBest)
+        assertFalse(result.isNewTrackRecord) // 52410 is faster
+
+        // Query personal best
+        val pb = leaderboardManager.getPersonalBest(trackId, testPlayer)
+        assertNotNull(pb)
+        assertEquals(testPlayer, pb!!.playerName)
+        assertEquals(testCar, pb.vehicleUsed)
+        assertEquals(testTimeMs, pb.completionTimeMs)
+
+        // Now beat the all-time track record with an incredible lap!
+        val recordLapTimeMs = 50900L
+        val recordResult = leaderboardManager.recordTimeTrialCompletion(
+            trackId = trackId,
+            trackName = "Monaco Riviera Grand Prix",
+            playerName = testPlayer,
+            vehicleUsed = "Apex Formula Open-Wheel",
+            completionTimeMs = recordLapTimeMs,
+            cleanLap = true
+        )
+
+        assertEquals(1, recordResult.newRank)
+        assertTrue(recordResult.isNewTrackRecord)
+        assertTrue(recordResult.isNewPersonalBest)
+
+        val newTrackRecord = leaderboardManager.getTrackRecord(trackId)
+        assertNotNull(newTrackRecord)
+        assertEquals(testPlayer, newTrackRecord!!.playerName)
+        assertEquals("Apex Formula Open-Wheel", newTrackRecord.vehicleUsed)
+        assertEquals(recordLapTimeMs, newTrackRecord.completionTimeMs)
+        assertEquals("00:50.900", newTrackRecord.formattedCompletionTime)
+
+        // Cleanup test player entry
+        leaderboardManager.timeTrialRecordDao.deletePlayerRecordsForTrack(trackId, testPlayer)
+    }
+
+    @Test
+    fun `test LeaderboardManager formatting and time utilities`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val manager = com.example.data.LeaderboardManager(context)
+
+        assertEquals("00:52.410", manager.formatCompletionTime(52410L))
+        assertEquals("01:05.120", manager.formatCompletionTime(65120L))
+        assertEquals("02:15.005", manager.formatCompletionTime(135005L))
+        assertEquals("--:--.---", manager.formatCompletionTime(0L))
     }
 }
 

@@ -87,6 +87,7 @@ fun RacingApp(viewModel: MainViewModel) {
     val currentScreen by viewModel.currentScreen.collectAsState()
     val profile by viewModel.profile.collectAsState()
     val roomDailyChallenges by viewModel.roomDailyChallenges.collectAsState(initial = emptyList())
+    val careerProgress by viewModel.careerProgressFlow.collectAsState(initial = null)
     val latestUnlockedBadges by viewModel.latestUnlockedBadges.collectAsState()
     var showAchievementsDialog by remember { mutableStateOf(false) }
     var showDriverProfileDialog by remember { mutableStateOf(false) }
@@ -264,6 +265,8 @@ fun RacingApp(viewModel: MainViewModel) {
                             AppScreen.CAREER -> {
                                 CareerScreen(
                                     profile = profile,
+                                    careerProgress = careerProgress,
+                                    careerManager = viewModel.careerManager,
                                     onStartCareerRace = { viewModel.startCareerRace(it) },
                                     onClaimChallenge = { viewModel.claimChallenge(it) },
                                     onClaimAllBonus = { viewModel.claimAllDailyBonus() },
@@ -285,7 +288,8 @@ fun RacingApp(viewModel: MainViewModel) {
                                     },
                                     onOpenReplayViewer = { trackId ->
                                         viewModel.openReplayViewer(trackId)
-                                    }
+                                    },
+                                    timeTrialRecordsProvider = { viewModel.getTimeTrialRecordsForTrack(it) }
                                 )
                             }
 

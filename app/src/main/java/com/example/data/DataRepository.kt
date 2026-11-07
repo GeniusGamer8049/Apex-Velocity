@@ -14,6 +14,10 @@ import com.example.data.room.GlobalLeaderboards
 import com.example.data.room.GlobalLeaderboardsDao
 import com.example.data.room.ReplayStorage
 import com.example.data.room.ReplayStorageDao
+import com.example.data.room.CareerProgress
+import com.example.data.room.CareerProgressDao
+import com.example.data.room.TimeTrialRecord
+import com.example.data.room.TimeTrialRecordDao
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -22,7 +26,7 @@ import kotlinx.coroutines.withContext
 /**
  * Data Repository class that abstracts Room database operations from the UI layer,
  * providing a clean, thread-safe, reactive API for accessing and persisting
- * [DriverProfile], [GameStatistics], [Achievements], [DailyChallenges], and [GlobalLeaderboards] data.
+ * [DriverProfile], [GameStatistics], [Achievements], [DailyChallenges], [GlobalLeaderboards], [CareerProgress], and [TimeTrialRecord] data.
  */
 class DataRepository(
     val driverProfileDao: DriverProfileDao,
@@ -31,6 +35,8 @@ class DataRepository(
     val dailyChallengesDao: DailyChallengesDao? = null,
     val globalLeaderboardsDao: GlobalLeaderboardsDao? = null,
     val replayStorageDao: ReplayStorageDao? = null,
+    val careerProgressDao: CareerProgressDao? = null,
+    val timeTrialRecordDao: TimeTrialRecordDao? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) {
 
@@ -40,7 +46,9 @@ class DataRepository(
         achievementsDao = AppDatabase.getDatabase(context).achievementsDao(),
         dailyChallengesDao = AppDatabase.getDatabase(context).dailyChallengesDao(),
         globalLeaderboardsDao = AppDatabase.getDatabase(context).globalLeaderboardsDao(),
-        replayStorageDao = AppDatabase.getDatabase(context).replayStorageDao()
+        replayStorageDao = AppDatabase.getDatabase(context).replayStorageDao(),
+        careerProgressDao = AppDatabase.getDatabase(context).careerProgressDao(),
+        timeTrialRecordDao = AppDatabase.getDatabase(context).timeTrialRecordDao()
     )
 
     val driverProfileRepository = DriverProfileRepository(driverProfileDao, ioDispatcher)
@@ -49,6 +57,9 @@ class DataRepository(
     val dailyChallengesRepository = dailyChallengesDao?.let { DailyChallengesRepository(it, ioDispatcher) }
     val globalLeaderboardsRepository = globalLeaderboardsDao?.let { GlobalLeaderboardsRepository(it, ioDispatcher) }
     val replayStorageRepository = replayStorageDao?.let { ReplayStorageRepository(it, ioDispatcher) }
+    val careerManager = careerProgressDao?.let { CareerManager(it, ioDispatcher) }
+    val leaderboardManager = timeTrialRecordDao?.let { LeaderboardManager(it, ioDispatcher) }
+    val achievementManager = achievementsDao?.let { AchievementManager(it, driverProfileDao, ioDispatcher) }
 
     // ========================================================================
     // Driver Profile APIs

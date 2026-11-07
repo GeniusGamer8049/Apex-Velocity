@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Timer
@@ -35,6 +36,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.PlayerProfile
+import com.example.data.room.TimeTrialRecord
 import com.example.model.GhostLap
 import com.example.model.Track
 import com.example.model.TrackRegistry
@@ -63,6 +66,8 @@ import com.example.ui.theme.DarkSurfaceElevated
 import com.example.ui.theme.SurfaceBorder
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextWhite
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 @Composable
 fun TimeTrialScreen(
@@ -70,11 +75,17 @@ fun TimeTrialScreen(
     ghostLapProvider: (String) -> GhostLap?,
     onStartTimeTrial: (track: Track, weather: WeatherType, enableGhost: Boolean) -> Unit,
     onViewLeaderboard: ((trackId: String) -> Unit)? = null,
-    onOpenReplayViewer: (trackId: String) -> Unit = {}
+    onOpenReplayViewer: (trackId: String) -> Unit = {},
+    timeTrialRecordsProvider: ((String) -> Flow<List<TimeTrialRecord>>)? = null
 ) {
     var selectedTrackId by remember { mutableStateOf("monaco_riviera") }
     var selectedWeather by remember { mutableStateOf(WeatherType.SUNNY_CLEAR) }
     var enableGhost by remember { mutableStateOf(true) }
+
+    val timeTrialRecordsFlow = remember(selectedTrackId, timeTrialRecordsProvider) {
+        timeTrialRecordsProvider?.invoke(selectedTrackId) ?: flowOf(emptyList())
+    }
+    val timeTrialRecords by timeTrialRecordsFlow.collectAsState(initial = emptyList())
 
     val track = TrackRegistry.getTrackById(selectedTrackId)
     val bestLapTime = profile.bestLapTimes[selectedTrackId]
@@ -251,6 +262,128 @@ fun TimeTrialScreen(
                         Column {
                             Text(text = currentVehicle.name, color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             Text(text = "${currentVehicle.effectiveBhp} BHP • ${currentVehicle.effectiveTopSpeedKmh} km/h • ${currentVehicle.upgrades.tireCompound.displayName}", color = TextMuted, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Top Time Trial Records Card (LeaderboardManager Room records)
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, SurfaceBorder, RoundedCornerShape(12.dp))
+                    .testTag("time_trial_leaderboard_card"),
+                colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = ApexGold, modifier = Modifier.size(18.dp))
+                            Text(
+                                text = "TOP TIME TRIAL RECORDS",
+                                color = TextWhite,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                        Text(
+                            text = track.name,
+                            color = ApexCyan,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    if (timeTrialRecords.isEmpty()) {
+                        Text(
+                            text = "No recorded lap times yet for this circuit. Be the first to set a benchmark record!",
+                            color = TextMuted,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    } else {
+                        val leaderTime = timeTrialRecords.first().completionTimeMs
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            timeTrialRecords.take(5).forEachIndexed { index, record ->
+                                val isLeader = index == 0
+                                val rankColor = when (index) {
+                                    0 -> ApexGold
+                                    1 -> Color(0xFFCFD8DC)
+                                    2 -> Color(0xFFBCAAA4)
+                                    else -> TextMuted
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (record.isPlayer) ApexCyan.copy(alpha = 0.12f) else DarkSurface)
+                                        .border(
+                                            1.dp,
+                                            if (record.isPlayer) ApexCyan.copy(alpha = 0.5f) else SurfaceBorder.copy(alpha = 0.4f),
+                                            RoundedCornerShape(8.dp)
+                                        )
+                                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "#${record.rank}",
+                                            color = rankColor,
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 12.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            modifier = Modifier.width(26.dp)
+                                        )
+                                        Column {
+                                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = record.playerName,
+                                                    color = if (record.isPlayer) ApexCyan else TextWhite,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 12.sp
+                                                )
+                                                if (record.isPlayer) {
+                                                    Text(
+                                                        text = "(YOU)",
+                                                        color = ApexGreen,
+                                                        fontWeight = FontWeight.Black,
+                                                        fontSize = 10.sp
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                text = record.vehicleUsed,
+                                                color = TextMuted,
+                                                fontSize = 10.sp
+                                            )
+                                        }
+                                    }
+
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = record.formattedCompletionTime,
+                                            color = if (isLeader) ApexGold else TextWhite,
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 12.sp,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                        Text(
+                                            text = record.formattedGap(leaderTime),
+                                            color = if (isLeader) ApexGreen else TextMuted,
+                                            fontSize = 10.sp,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

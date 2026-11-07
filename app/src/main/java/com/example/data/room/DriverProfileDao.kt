@@ -106,4 +106,12 @@ interface DriverProfileDao {
         id: String = "primary_driver",
         timestamp: Long = System.currentTimeMillis()
     )
+
+    @Query("UPDATE driver_profile SET credits = credits + :credits, reputation = reputation + :rep, lastUpdatedTimestamp = :timestamp WHERE id = :id")
+    suspend fun addCreditsAndRep(
+        id: String = "primary_driver",
+        credits: Int,
+        rep: Int,
+        timestamp: Long = System.currentTimeMillis()
+    )
 }

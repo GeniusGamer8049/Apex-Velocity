@@ -72,6 +72,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val dailyChallengesRepository: com.example.data.DailyChallengesRepository = repository.dailyChallengesRepository
     val globalLeaderboardsRepository: com.example.data.GlobalLeaderboardsRepository = repository.globalLeaderboardsRepository
     val replayStorageRepository: com.example.data.ReplayStorageRepository = repository.replayStorageRepository
+    val careerManager: com.example.data.CareerManager = repository.careerManager
+    val careerProgressFlow: Flow<com.example.data.room.CareerProgress?> = careerManager.careerProgressFlow
+    val latestCareerUpdate = MutableStateFlow<com.example.data.CareerUpdateResult?>(null)
     val profile: StateFlow<PlayerProfile> = repository.profile
     val allReplays: Flow<List<com.example.data.room.ReplayStorage>> = replayStorageRepository.allReplaysFlow
     val replaySelectedTrackId = MutableStateFlow(TrackRegistry.allTracks.first().id)
@@ -103,6 +106,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun getBestReplayForTrack(trackId: String): Flow<com.example.data.room.ReplayStorage?> =
         replayStorageRepository.getBestReplayForTrackFlow(trackId)
+
+    val leaderboardManager: com.example.data.LeaderboardManager = repository.leaderboardManager
+
+    fun getTimeTrialRecordsForTrack(trackId: String, limit: Int = 10): Flow<List<com.example.data.room.TimeTrialRecord>> =
+        leaderboardManager.getTopRecordsForTrackFlow(trackId, limit)
+
+    fun getTimeTrialTrackRecord(trackId: String): Flow<com.example.data.room.TimeTrialRecord?> =
+        leaderboardManager.getTrackRecordFlow(trackId)
 
     fun selectReplayTrack(trackId: String) {
         replaySelectedTrackId.value = trackId
@@ -837,6 +848,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         postRaceResult.value = postResult
+
+        viewModelScope.launch {
+            try {
+                val careerRes = careerManager.processRaceResult(
+                    position = pos,
+                    totalRacers = aiRacers.value.size + 1,
+                    trackId = activeTrack.id,
+                    isClean = cleanLap,
+                    driftScore = pState.driftScore,
+                    careerEventId = event?.id
+                )
+                latestCareerUpdate.value = careerRes
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "Error processing career progression in Room", e)
+            }
+        }
 
         raceResults.value = RaceResults(
             position = pos,
