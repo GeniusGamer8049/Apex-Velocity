@@ -2801,7 +2801,381 @@ class ExampleRobolectricTest {
         assertEquals("02:15.005", manager.formatCompletionTime(135005L))
         assertEquals("--:--.---", manager.formatCompletionTime(0L))
     }
+
+    @Test
+    fun `test TelemetryDashboard metrics model for velocity engine temp and tire wear`() {
+        val point = com.example.model.TelemetryPoint(
+            timeSec = 14.5f,
+            speedKmh = 245.8f,
+            rpm = 7400f,
+            throttle = 0.95f,
+            brake = 0.0f,
+            lateralG = 1.35f,
+            longitudinalG = 0.65f,
+            tempFL = 98.5f,
+            tempFR = 96.0f,
+            tempRL = 104.0f,
+            tempRR = 102.5f,
+            gear = 5,
+            downforceN = 580f,
+            frictionDragN = 620f,
+            frictionRollingN = 180f,
+            effectiveGripPct = 0.92f,
+            slipAngleDeg = 4.2f,
+            slipRatio = 0.08f,
+            frictionCirclePct = 84f,
+            vLongMs = 68.2f,
+            vLatMs = 2.4f,
+            engineTempC = 96.5f,
+            engineOilTempC = 102.0f,
+            tireWearFL = 0.12f,
+            tireWearFR = 0.10f,
+            tireWearRL = 0.18f,
+            tireWearRR = 0.16f
+        )
+
+        assertEquals(245.8f, point.speedKmh, 0.01f)
+        assertEquals(96.5f, point.engineTempC, 0.01f)
+        assertEquals(102.0f, point.engineOilTempC, 0.01f)
+        assertEquals(0.12f, point.tireWearFL, 0.01f)
+        assertEquals(0.18f, point.tireWearRL, 0.01f)
+
+        // Average tire wear: (12% + 10% + 18% + 16%) / 4 = 14%
+        assertEquals(14.0f, point.avgTireWearPct, 0.01f)
+        // Min tire life remaining: 100% - 18% = 82%
+        assertEquals(82.0f, point.minTireLifePct, 0.01f)
+        assertTrue("Engine in optimal thermal operating window", point.engineTempC in 80f..105f)
+        assertTrue("Tires still have over 80% remaining tread", point.minTireLifePct > 80f)
+    }
+
+    @Test
+    fun `test PhysicsEngine dynamic updates for engine temperature and tire wear`() {
+        val physicsEngine = com.example.physics.PhysicsEngine()
+        val vehicle = VehicleRegistry.createDefaultVehicles().first()
+        val track = TrackRegistry.allTracks.first()
+        val state = com.example.physics.CarPhysicsState(
+            x = track.startWaypoint.x,
+            y = track.startWaypoint.y,
+            headingDeg = 0f,
+            engineTempC = 85.0f,
+            tireWearFL = 0.05f,
+            tireWearFR = 0.05f,
+            tireWearRL = 0.05f,
+            tireWearRR = 0.05f
+        )
+
+        val initialTemp = state.engineTempC
+        val initialWear = state.tireWearFL
+
+        // Simulate 20 active gameplay physics updates under full throttle and cornering
+        for (i in 0 until 20) {
+            physicsEngine.updatePlayer(
+                state = state,
+                vehicle = vehicle,
+                track = track,
+                currentWeather = com.example.model.WeatherType.SUNNY_CLEAR,
+                trackWetness = 0.0f,
+                throttleInput = 1.0f,
+                brakeInput = 0.0f,
+                steerInput = 0.35f,
+                handbrakeInput = false,
+                boostInput = false,
+                particleSystem = com.example.physics.ParticleSystem(),
+                dt = 0.05f
+            )
+        }
+
+        assertTrue("Engine temperature should dynamically heat under throttle", state.engineTempC > initialTemp)
+        assertTrue("Tire wear should dynamically increase under cornering friction", state.tireWearFL >= initialWear)
+    }
+
+    @Test
+    fun `test AchievementManager Room milestone tracking for first race win and 250 kmh top speed`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val appDb = com.example.data.room.AppDatabase.getDatabase(context)
+        val achievementsDao = appDb.achievementsDao()
+        val driverProfileDao = appDb.driverProfileDao()
+        val achievementManager = com.example.data.AchievementManager(achievementsDao, driverProfileDao)
+
+        kotlinx.coroutines.runBlocking<Unit> {
+            achievementManager.resetAchievements()
+
+            // Verify initial seeded state
+            val all = achievementManager.getAllAchievements()
+            assertTrue("Default milestone achievements seeded in Room", all.isNotEmpty())
+            val firstWinInitial = achievementManager.getAchievement(com.example.data.room.DefaultAchievements.ID_FIRST_WIN)
+            assertNotNull(firstWinInitial)
+            assertFalse("First win locked initially", firstWinInitial!!.isUnlocked)
+
+            // Milestone 1: Player wins their first race
+            val unlockEventsWin = achievementManager.trackRaceMilestones(
+                isWin = true,
+                topSpeedKmh = 180f,
+                isClean = true,
+                isPodium = true,
+                isWetWin = false,
+                totalWins = 1
+            )
+            assertTrue("Milestone unlock event emitted for first race win", unlockEventsWin.any { it.achievement.id == com.example.data.room.DefaultAchievements.ID_FIRST_WIN })
+            val firstWinAfter = achievementManager.getAchievement(com.example.data.room.DefaultAchievements.ID_FIRST_WIN)
+            assertTrue("First win achievement unlocked in Room", firstWinAfter?.isUnlocked == true)
+
+            // Milestone 2: Player achieves 260 km/h top speed (unlocks Speed Demon at 250 km/h)
+            val unlockEventsSpeed = achievementManager.trackRaceMilestones(
+                isWin = false,
+                topSpeedKmh = 265f,
+                isClean = false,
+                isPodium = false,
+                isWetWin = false
+            )
+            assertTrue("Speed Demon milestone unlocked for reaching >250 km/h", unlockEventsSpeed.any { it.achievement.id == com.example.data.room.DefaultAchievements.ID_SPEED_DEMON })
+            val speedDemon = achievementManager.getAchievement(com.example.data.room.DefaultAchievements.ID_SPEED_DEMON)
+            assertTrue("Speed Demon unlocked in Room", speedDemon?.isUnlocked == true)
+
+            // Test claim reward
+            val claimResult = achievementManager.claimAchievementReward(com.example.data.room.DefaultAchievements.ID_FIRST_WIN)
+            assertTrue("Reward claimed successfully", claimResult.success)
+            assertEquals(3000, claimResult.creditsAwarded)
+
+            // Double claim prevention
+            val doubleClaimResult = achievementManager.claimAchievementReward(com.example.data.room.DefaultAchievements.ID_FIRST_WIN)
+            assertFalse("Cannot claim already claimed reward", doubleClaimResult.success)
+        }
+    }
+
+    @Test
+    fun `test ReplayManager race physics telemetry capture session and buffer`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val replayManager = com.example.data.ReplayManager(context)
+
+        replayManager.startRecordingSession(
+            trackId = "apex_speedway",
+            trackName = "Apex Super Speedway",
+            vehicleId = "apex_gt86",
+            vehicleName = "Apex GT-86 Coupe",
+            weatherType = "SUNNY_CLEAR"
+        )
+        assertTrue(replayManager.isRecording.value)
+        assertEquals(0, replayManager.recordedFrameCount.value)
+
+        val physicsState = com.example.physics.CarPhysicsState(
+            x = 100f,
+            y = 200f,
+            headingDeg = 45f,
+            speedKmh = 120f
+        )
+        physicsState.currentLapTimeMs = 50L
+        physicsState.isBraking = false
+
+        // Record first frame
+        val captured1 = replayManager.recordPhysicsState(physicsState)
+        assertTrue("First physics frame captured", captured1)
+        assertEquals(1, replayManager.recordedFrameCount.value)
+
+        // Try recording immediately without time delta or braking (should be downsampled)
+        physicsState.currentLapTimeMs = 60L
+        val capturedTooSoon = replayManager.recordPhysicsState(physicsState, sampleIntervalMs = 32L)
+        assertFalse("Frame within 10ms should be skipped for downsampling", capturedTooSoon)
+
+        // Record after sample interval
+        physicsState.currentLapTimeMs = 95L
+        physicsState.x = 115f
+        physicsState.y = 210f
+        val captured2 = replayManager.recordPhysicsState(physicsState, sampleIntervalMs = 32L)
+        assertTrue("Frame after 45ms should be captured", captured2)
+        assertEquals(2, replayManager.recordedFrameCount.value)
+
+        val frames = replayManager.getRecordedFrames()
+        assertEquals(2, frames.size)
+        assertEquals(50L, frames[0].timeMs)
+        assertEquals(95L, frames[1].timeMs)
+
+        // Test buffer reset
+        replayManager.resetRecordingBuffer()
+        assertEquals(0, replayManager.recordedFrameCount.value)
+        assertTrue("Recording session remains active after lap reset", replayManager.isRecording.value)
+
+        replayManager.cancelRecordingSession()
+        assertFalse(replayManager.isRecording.value)
+    }
+
+    @Test
+    fun `test ReplayManager completed lap saving and Room persistence`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val appDb = com.example.data.room.AppDatabase.getDatabase(context)
+        val dao = appDb.replayStorageDao()
+        val replayManager = com.example.data.ReplayManager(dao)
+
+        kotlinx.coroutines.runBlocking<Unit> {
+            dao.clearAllReplays()
+            replayManager.ensureDefaultReplays()
+
+            val trackId = "mount_akina"
+            replayManager.startRecordingSession(
+                trackId = trackId,
+                trackName = "Mount Akina Downhill Touge",
+                vehicleId = "apex_gt86",
+                vehicleName = "Apex GT-86 Coupe"
+            )
+
+            // Simulate capturing 10 physics frames over a completed lap
+            for (i in 0 until 10) {
+                val t = (i * 200).toLong()
+                replayManager.recordFrame(
+                    com.example.model.GhostFrame(
+                        timeMs = t,
+                        x = 150f + (i * 12f),
+                        y = 300f + (i * 8f),
+                        heading = (i * 5f),
+                        speedKmh = 140f + (i * 2f),
+                        isBraking = i >= 8
+                    )
+                )
+            }
+            assertEquals(10, replayManager.recordedFrameCount.value)
+
+            // Process and save completed lap into Room
+            val lapTimeMs = 49250L // 49.250s
+            val saveResult = replayManager.saveCompletedLap(
+                lapTimeMs = lapTimeMs,
+                cleanLap = true
+            )
+
+            assertNotNull("Save result should not be null", saveResult)
+            assertEquals(trackId, saveResult!!.replay.trackId)
+            assertEquals(lapTimeMs, saveResult.replay.lapTimeMs)
+            assertTrue("Should be registered as personal best", saveResult.isNewPersonalBest)
+            assertEquals(10, saveResult.totalFrames)
+
+            // Verify Room persistence
+            val bestReplay = dao.getBestReplayForTrack(trackId)
+            assertNotNull(bestReplay)
+            assertEquals(lapTimeMs, bestReplay!!.lapTimeMs)
+            assertEquals(10, bestReplay.frameCount)
+
+            // Buffer should be clean for next lap
+            assertEquals(0, replayManager.recordedFrameCount.value)
+
+            // Cleanup test record
+            dao.deleteReplayById(saveResult.replay.id)
+        }
+    }
+
+    @Test
+    fun `test ReplayManager ghost car time trial replay playback and sampling`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val replayManager = com.example.data.ReplayManager(context)
+
+        kotlinx.coroutines.runBlocking<Unit> {
+            replayManager.ensureDefaultReplays()
+
+            val trackId = "monaco_riviera"
+            val ghostLap = replayManager.loadGhostLapForTrack(trackId)
+            assertNotNull("Ghost car must load for circuit", ghostLap)
+            assertTrue("Ghost car has frames", ghostLap!!.frames.isNotEmpty())
+            assertEquals(ghostLap, replayManager.activeGhostLap.value)
+
+            // Sample ghost car at start
+            val startFrame = replayManager.sampleActiveGhost(0L)
+            assertNotNull(startFrame)
+            assertEquals(0L, startFrame!!.timeMs)
+
+            // Sample ghost car midway
+            val midTimeMs = ghostLap.lapTimeMs / 2
+            val midFrame = replayManager.sampleActiveGhost(midTimeMs)
+            assertNotNull(midFrame)
+            assertEquals(midTimeMs, midFrame!!.timeMs)
+            assertTrue("Ghost car speed > 0", midFrame.speedKmh > 0f)
+
+            // Test delta comparison
+            val comparison = replayManager.compareWithGhost(
+                playerLapTimeMs = midTimeMs,
+                playerSpeedKmh = 150f,
+                playerX = midFrame.x + 5f,
+                playerY = midFrame.y + 5f
+            )
+            assertNotNull(comparison)
+            assertEquals(0f, comparison!!.deltaSeconds, 0.05f)
+            assertTrue("Distance separation calculated", comparison.distanceSeparationM > 0f)
+        }
+    }
+
+    @Test
+    fun `test telemetry physics analyzer extracts peak inflection moments`() {
+        val frames = listOf(
+            com.example.model.GhostFrame(timeMs = 0L, x = 100f, y = 100f, heading = 0f, speedKmh = 120f, isBraking = false),
+            com.example.model.GhostFrame(timeMs = 5000L, x = 300f, y = 100f, heading = 0f, speedKmh = 230f, isBraking = false), // Peak top speed
+            com.example.model.GhostFrame(timeMs = 6000L, x = 450f, y = 100f, heading = 10f, speedKmh = 140f, isBraking = true), // Heavy braking
+            com.example.model.GhostFrame(timeMs = 7000L, x = 500f, y = 180f, heading = 75f, speedKmh = 95f, isBraking = false), // Apex corner
+            com.example.model.GhostFrame(timeMs = 12000L, x = 700f, y = 300f, heading = 120f, speedKmh = 160f, isBraking = false), // High slip sweeper
+            com.example.model.GhostFrame(timeMs = 18000L, x = 100f, y = 100f, heading = 350f, speedKmh = 210f, isBraking = false) // Finish sprint
+        )
+
+        val inflections = com.example.data.ai.TelemetryPhysicsAnalyzer.analyzeFrames(
+            frames = frames,
+            totalLapTimeMs = 18000L,
+            maxSpeedKmh = 230f,
+            avgSpeedKmh = 159f
+        )
+
+        assertTrue("Inflections extracted", inflections.isNotEmpty())
+        assertTrue("Contains Top Speed event", inflections.any { it.eventType == com.example.data.ai.InflectionEventType.TOP_SPEED_STRAIGHT })
+        assertTrue("Contains Braking event", inflections.any { it.eventType == com.example.data.ai.InflectionEventType.HEAVY_BRAKING_ZONE })
+        assertTrue("Contains Finish event", inflections.any { it.eventType == com.example.data.ai.InflectionEventType.FINISH_LINE_SPRINT })
+
+        // Check chronological ordering
+        for (i in 0 until inflections.size - 1) {
+            assertTrue("Inflections must be sorted chronologically", inflections[i].timeMs <= inflections[i + 1].timeMs)
+        }
+    }
+
+    @Test
+    fun `test gemini cinematic highlight reel creation from replay storage`() {
+        kotlinx.coroutines.runBlocking {
+            val defaults = com.example.data.room.ReplayStorage.createDefaultReplays()
+            val monacoReplay = defaults.first { it.trackId == "monaco_riviera" }
+            assertNotNull(monacoReplay)
+
+            val service = com.example.data.ai.GeminiCinematicHighlightService()
+            val reel = service.generateHighlightReel(monacoReplay)
+
+            assertNotNull("Highlight reel must be generated", reel)
+            assertEquals(monacoReplay.trackId, reel.trackId)
+            assertEquals(monacoReplay.vehicleName, reel.vehicleName)
+            assertTrue("Director cut has multiple scenes", reel.scenes.size >= 4)
+            assertTrue("Total duration > 0", reel.totalDurationSec > 0f)
+
+            // Validate scene properties
+            val firstScene = reel.scenes.first()
+            assertNotNull(firstScene.cameraAngle)
+            assertNotNull(firstScene.visualFilter)
+            assertTrue(firstScene.title.isNotBlank())
+            assertTrue(firstScene.directorCommentary.isNotBlank())
+            assertTrue(firstScene.speedMultiplier in 0.25f..2.0f)
+            assertTrue("Start time <= End time", firstScene.startTimeMs <= firstScene.endTimeMs)
+        }
+    }
+
+    @Test
+    fun `test highlight generator integration with replay manager`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val replayManager = com.example.data.ReplayManager(context)
+
+        kotlinx.coroutines.runBlocking {
+            replayManager.ensureDefaultReplays()
+            val bestReplay = replayManager.getBestReplayForTrack("monaco_riviera")
+            assertNotNull("Stored replay exists", bestReplay)
+
+            val service = com.example.data.ai.GeminiCinematicHighlightService()
+            val reel = service.generateHighlightReel(bestReplay!!)
+
+            assertNotNull("Reel successfully generated from replay manager", reel)
+            assertTrue("Contains apex and straightaway cuts", reel.scenes.any { it.cameraAngle == com.example.model.CameraShotType.DRONE_SWOOP || it.cameraAngle == com.example.model.CameraShotType.FRONT_BUMPER || it.cameraAngle == com.example.model.CameraShotType.CHASE_CAM })
+            assertTrue("Commentary generated", reel.overallDirectorSummary.isNotBlank())
+        }
+    }
 }
+
 
 
 

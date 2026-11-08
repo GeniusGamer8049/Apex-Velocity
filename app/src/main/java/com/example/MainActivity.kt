@@ -72,6 +72,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.example.util.configureAppCheck(this, intent)
         enableEdgeToEdge()
 
         setContent {
@@ -88,6 +89,7 @@ fun RacingApp(viewModel: MainViewModel) {
     val profile by viewModel.profile.collectAsState()
     val roomDailyChallenges by viewModel.roomDailyChallenges.collectAsState(initial = emptyList())
     val careerProgress by viewModel.careerProgressFlow.collectAsState(initial = null)
+    val unlockedAchievements by viewModel.unlockedAchievementsFlow.collectAsState(initial = emptyList())
     val latestUnlockedBadges by viewModel.latestUnlockedBadges.collectAsState()
     var showAchievementsDialog by remember { mutableStateOf(false) }
     var showDriverProfileDialog by remember { mutableStateOf(false) }
@@ -138,7 +140,12 @@ fun RacingApp(viewModel: MainViewModel) {
                             viewModel.selectLeaderboardTrack(trackId)
                             viewModel.navigateTo(AppScreen.LEADERBOARD)
                         },
-                        onOpenAchievements = { showAchievementsDialog = true }
+                        onOpenAchievements = { showAchievementsDialog = true },
+                        onWatchHighlights = {
+                            val targetTrack = postRaceResult?.trackId ?: "monaco_riviera"
+                            viewModel.openReplayViewer(targetTrack)
+                            viewModel.generateHighlightsForCurrentTrack(targetTrack)
+                        }
                     )
                 } else {
                     viewModel.navigateTo(AppScreen.CAREER)
@@ -243,6 +250,7 @@ fun RacingApp(viewModel: MainViewModel) {
                                 GarageScreen(
                                     profile = profile,
                                     dailyChallenges = roomDailyChallenges,
+                                    unlockedAchievements = unlockedAchievements,
                                     onSelectVehicle = { viewModel.selectVehicle(it) },
                                     onPurchaseVehicle = { viewModel.purchaseVehicle(it) },
                                     onUpgradeVehicle = { vid, cat -> viewModel.upgradeVehicle(vid, cat) },
@@ -396,6 +404,98 @@ fun RacingApp(viewModel: MainViewModel) {
                     showAchievementsDialog = true
                 }
             )
+        }
+
+        // Overlay: Gemini Omni Flash Cinematic Video Highlight Reel & Director Dialog
+        val showCinematicModal by viewModel.showCinematicHighlightModal.collectAsState()
+        val cinematicHighlightState by viewModel.cinematicHighlightState.collectAsState()
+
+        if (showCinematicModal) {
+            when (val state = cinematicHighlightState) {
+                is com.example.model.CinematicHighlightUiState.AnalyzingTelemetry,
+                is com.example.model.CinematicHighlightUiState.GeneratingWithGemini -> {
+                    val statusText = if (state is com.example.model.CinematicHighlightUiState.AnalyzingTelemetry) {
+                        state.step
+                    } else {
+                        (state as com.example.model.CinematicHighlightUiState.GeneratingWithGemini).promptPreview
+                    }
+                    androidx.compose.ui.window.Dialog(onDismissRequest = { viewModel.dismissCinematicHighlight() }) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .border(1.dp, ApexCyan, RoundedCornerShape(16.dp))
+                                    .padding(20.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                androidx.compose.material3.CircularProgressIndicator(color = ApexCyan, strokeWidth = 3.dp)
+                                Text(
+                                    text = "GEMINI OMNI FLASH DIRECTING",
+                                    color = ApexCyan,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Black,
+                                    letterSpacing = 1.sp
+                                )
+                                Text(
+                                    text = statusText,
+                                    color = TextWhite,
+                                    fontSize = 12.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                }
+                is com.example.model.CinematicHighlightUiState.Success -> {
+                    val currentTrackId by viewModel.replaySelectedTrackId.collectAsState()
+                    val currentReplay by viewModel.getBestReplayForTrack(currentTrackId).collectAsState(initial = null)
+                    if (currentReplay != null) {
+                        com.example.ui.components.CinematicHighlightViewer(
+                            reel = state.reel,
+                            replay = currentReplay!!,
+                            onClose = { viewModel.dismissCinematicHighlight() },
+                            onRegenerate = { viewModel.generateHighlightsForCurrentTrack() },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+                is com.example.model.CinematicHighlightUiState.Error -> {
+                    androidx.compose.ui.window.Dialog(onDismissRequest = { viewModel.dismissCinematicHighlight() }) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .border(1.dp, ApexRed, RoundedCornerShape(16.dp))
+                                    .padding(20.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text("DIRECTOR GENERATION ERROR", color = ApexRed, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                                Text(state.message, color = TextWhite, fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                androidx.compose.material3.Button(
+                                    onClick = { viewModel.dismissCinematicHighlight() },
+                                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = DarkSurface, contentColor = TextWhite),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("CLOSE")
+                                }
+                            }
+                        }
+                    }
+                }
+                else -> {}
+            }
         }
     }
 }

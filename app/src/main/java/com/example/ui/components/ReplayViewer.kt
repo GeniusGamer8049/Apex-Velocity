@@ -21,7 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -54,8 +55,12 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import com.example.data.ai.GeminiCinematicHighlightService
+import com.example.model.CinematicHighlightReel
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -106,7 +111,8 @@ fun ReplayViewer(
     initialTrackId: String = TrackRegistry.allTracks.first().id,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
-    repository: ReplayStorageRepository = ReplayStorageRepository.getInstance(LocalContext.current)
+    repository: ReplayStorageRepository = ReplayStorageRepository.getInstance(LocalContext.current),
+    replayManager: com.example.data.ReplayManager = com.example.data.ReplayManager(LocalContext.current)
 ) {
     BackHandler { onClose() }
 
@@ -177,6 +183,12 @@ fun ReplayViewer(
         ghostLap.sampleAt(currentPlaybackTimeMs)
     }
 
+    val coroutineScope = rememberCoroutineScope()
+    val geminiHighlightService = remember { GeminiCinematicHighlightService() }
+    var showCinematicModal by remember { mutableStateOf(false) }
+    var isGeneratingHighlights by remember { mutableStateOf(false) }
+    var activeReel by remember { mutableStateOf<CinematicHighlightReel?>(null) }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -228,15 +240,56 @@ fun ReplayViewer(
                     }
                 }
 
-                IconButton(
-                    onClick = onClose,
-                    modifier = Modifier.size(36.dp).testTag("replay_close_button")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close Replay Viewer",
-                        tint = TextWhite
-                    )
+                    // Gemini Omni Flash Cinematic Video Highlight Trigger Button
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(ApexCyan.copy(alpha = 0.18f))
+                            .border(1.dp, ApexCyan, RoundedCornerShape(8.dp))
+                            .clickable(enabled = !isGeneratingHighlights) {
+                                val currentReplay = replayEntity
+                                if (currentReplay != null) {
+                                    isGeneratingHighlights = true
+                                    coroutineScope.launch {
+                                        try {
+                                            val reel = geminiHighlightService.generateHighlightReel(currentReplay)
+                                            activeReel = reel
+                                            showCinematicModal = true
+                                        } finally {
+                                            isGeneratingHighlights = false
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .testTag("replay_gemini_highlight_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            if (isGeneratingHighlights) {
+                                CircularProgressIndicator(color = ApexCyan, modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                Text("DIRECTING...", color = ApexCyan, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                            } else {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = ApexCyan, modifier = Modifier.size(14.dp))
+                                Text("GEMINI HIGHLIGHTS", color = ApexCyan, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                            }
+                        }
+                    }
+
+                    IconButton(
+                        onClick = onClose,
+                        modifier = Modifier.size(36.dp).testTag("replay_close_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close Replay Viewer",
+                            tint = TextWhite
+                        )
+                    }
                 }
             }
 
@@ -334,7 +387,30 @@ fun ReplayViewer(
                 onRestart = { currentPlaybackTimeMs = 0L },
                 onToggleLoop = { isLooping = !isLooping },
                 onChangeSpeed = { playbackSpeed = it },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+            )
+        }
+
+        // Overlay: AI Cinematic Highlight Video Reel Player
+        if (showCinematicModal && activeReel != null && replayEntity != null) {
+            CinematicHighlightViewer(
+                reel = activeReel!!,
+                replay = replayEntity!!,
+                onClose = { showCinematicModal = false },
+                onRegenerate = {
+                    val currentReplay = replayEntity
+                    if (currentReplay != null) {
+                        coroutineScope.launch {
+                            isGeneratingHighlights = true
+                            try {
+                                activeReel = geminiHighlightService.generateHighlightReel(currentReplay)
+                            } finally {
+                                isGeneratingHighlights = false
+                            }
+                        }
+                    }
+                },
+                isGenerating = isGeneratingHighlights,
+                modifier = Modifier.fillMaxSize()
             )
         }
     }

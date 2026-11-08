@@ -25,7 +25,12 @@ import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Warning
+import com.example.model.TelemetryPoint
+import com.example.model.Vehicle
+import com.example.model.VehicleRegistry
+import com.example.ui.components.TelemetryDashboard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -98,7 +103,9 @@ fun RaceHud(
     controlsEnabled: Boolean = true,
     onToggleRaceTimer: () -> Unit = onPauseClick,
     onWeatherSelected: (WeatherCondition) -> Unit = {},
-    onRandomizeWeather: (() -> Unit)? = null
+    onRandomizeWeather: (() -> Unit)? = null,
+    telemetryHistory: List<TelemetryPoint> = emptyList(),
+    currentVehicle: Vehicle? = null
 ) {
     var showTelemetry by remember { mutableStateOf(false) }
 
@@ -169,17 +176,19 @@ fun RaceHud(
                         )
                     }
 
-                    // Telemetry toggle
+                    // Telemetry Dashboard toggle
                     IconButton(
                         onClick = { showTelemetry = !showTelemetry },
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(CarbonBlack.copy(alpha = 0.7f))
+                            .background(if (showTelemetry) ApexCyan.copy(alpha = 0.25f) else CarbonBlack.copy(alpha = 0.7f))
+                            .border(1.dp, if (showTelemetry) ApexCyan else SurfaceBorder, CircleShape)
+                            .testTag("toggle_telemetry_dashboard_button")
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Info,
-                            contentDescription = "Toggle Telemetry",
+                            imageVector = Icons.Default.Timeline,
+                            contentDescription = "Toggle Telemetry Dashboard",
                             tint = if (showTelemetry) ApexCyan else TextMuted
                         )
                     }
@@ -307,46 +316,21 @@ fun RaceHud(
             )
         }
 
-        // Telemetry Overlay Box
+        // Real-Time Telemetry Dashboard Overlay (Recharts Engine)
         AnimatedVisibility(
             visible = showTelemetry,
             enter = fadeIn(),
             exit = fadeOut(),
-            modifier = Modifier.align(Alignment.CenterStart).padding(top = 100.dp)
+            modifier = Modifier.align(Alignment.Center).fillMaxWidth(0.96f).padding(top = 20.dp, bottom = 40.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(CarbonBlack.copy(alpha = 0.90f))
-                    .border(1.dp, SurfaceBorder, RoundedCornerShape(12.dp))
-                    .padding(12.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text("PHYSICS INTEGRATION & TELEMETRY", color = ApexCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Text("Speed: ${playerState.speedKmh.toInt()} km/h | RPM: ${playerState.rpm.toInt()}", color = TextWhite, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                    Text(String.format("Velocity: Long %.1f m/s | Lat %.1f m/s", playerState.localVLong, playerState.localVLat), color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                    Text(String.format("Friction: Drag %.0fN | Rolling %.0fN (Total %.0fN)", playerState.frictionDragForceN, playerState.frictionRollingResistanceN, playerState.frictionTotalOpposingN), color = ApexGold, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                    Text(String.format("Tire Grip: %.0f%% (F: %.0f%% | R: %.0f%%)", playerState.effectiveTireGrip * 100f, playerState.frontTireGripPct * 100f, playerState.rearTireGripPct * 100f), color = if (playerState.effectiveTireGrip < 0.6f) ApexRed else ApexGreen, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                    Text(String.format("Slip: Angle %.1f° | Ratio %+.1f%% | Circle %.0f%%", playerState.slipAngleDeg, playerState.tireSlipRatio * 100f, playerState.frictionCircleUtilizationPct), color = if (playerState.isDrifting) ApexOrange else TextWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                    Text(String.format("G-Forces: Lat %.2fG | Long %+.2fG", playerState.lateralG, playerState.longitudinalG), color = if (playerState.lateralG > 1.2f) ApexRed else TextWhite, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                    Text(
-                        text = "Tires: FL:${playerState.tireTempFL.toInt()}° FR:${playerState.tireTempFR.toInt()}° RL:${playerState.tireTempRL.toInt()}° RR:${playerState.tireTempRR.toInt()}°C",
-                        color = if (playerState.tireTempFL > 110f || playerState.tireTempFR > 110f) ApexOrange else ApexGreen,
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    Text("Downforce: ${playerState.downforceN.toInt()} N | Brake Dist: ${playerState.estimatedBrakingDistanceM.toInt()}m", color = TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                    if (playerState.isWheelSpinning) {
-                        Text("⚠️ TRACTION: WHEELSPIN DETECTED", color = ApexOrange, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
-                    if (playerState.isWheelLockup) {
-                        Text("⚠️ BRAKING: WHEEL LOCKUP DETECTED", color = ApexRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
-                    if (playerState.driftScore > 0) {
-                        Text("Drift Points: ${playerState.driftScore}", color = ApexGold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
+            val vehicle = currentVehicle ?: VehicleRegistry.createDefaultVehicles().first()
+            TelemetryDashboard(
+                vehicle = vehicle,
+                telemetryHistory = telemetryHistory,
+                playerState = playerState,
+                isOverlay = true,
+                onDismiss = { showTelemetry = false }
+            )
         }
 
         // Center Drift Badge

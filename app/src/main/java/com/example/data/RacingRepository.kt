@@ -101,6 +101,8 @@ class RacingRepository(private val context: Context) {
     val careerManager: CareerManager = CareerManager(careerProgressDao)
     val timeTrialRecordDao: TimeTrialRecordDao = appDb.timeTrialRecordDao()
     val leaderboardManager: LeaderboardManager = LeaderboardManager(timeTrialRecordDao)
+    val achievementManager: AchievementManager = AchievementManager(achievementsDao, driverProfileDao)
+    val replayManager: ReplayManager = ReplayManager(replayStorageDao)
     val dataRepository: DataRepository = DataRepository(
         driverProfileDao = driverProfileDao,
         gameStatisticsDao = gameStatisticsDao,
@@ -131,6 +133,9 @@ class RacingRepository(private val context: Context) {
                 achievementsRepository.initDefaultAchievementsIfNeeded()
             } catch (ignored: Exception) {}
             try {
+                achievementManager.ensureDefaultAchievements()
+            } catch (ignored: Exception) {}
+            try {
                 dailyChallengesRepository.ensureTodayChallenges()
             } catch (ignored: Exception) {}
             try {
@@ -138,6 +143,9 @@ class RacingRepository(private val context: Context) {
             } catch (ignored: Exception) {}
             try {
                 replayStorageRepository.ensureDefaultReplays()
+            } catch (ignored: Exception) {}
+            try {
+                replayManager.ensureDefaultReplays()
             } catch (ignored: Exception) {}
             try {
                 careerManager.getCareerProgress()
@@ -900,6 +908,18 @@ class RacingRepository(private val context: Context) {
                         earningsCredits = 0,
                         reputationEarned = 0
                     )
+                )
+            } catch (ignored: Exception) {}
+            try {
+                achievementManager.trackRaceMilestones(
+                    isWin = isWin,
+                    topSpeedKmh = maxSpeedKmh,
+                    isClean = isClean,
+                    isPodium = isPodium,
+                    isWetWin = isWetWin,
+                    distanceMeters = distanceMeters,
+                    driftMeters = driftMeters,
+                    totalWins = newWins
                 )
             } catch (ignored: Exception) {}
         }

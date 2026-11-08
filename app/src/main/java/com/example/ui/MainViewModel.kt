@@ -38,6 +38,9 @@ import com.example.model.PostRaceResult
 import com.example.model.CareerObjectiveResult
 import com.example.model.RivalFinishResult
 import com.example.ui.dialogs.RaceResults
+import com.example.data.ai.GeminiCinematicHighlightService
+import com.example.model.CinematicHighlightReel
+import com.example.model.CinematicHighlightUiState
 import kotlin.math.abs
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -83,6 +86,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val allGameStatistics: Flow<List<GameStatistics>> = gameStatisticsRepository.allGameStatisticsFlow
     val topRaceTimes: Flow<List<GameStatistics>> = gameStatisticsRepository.topRaceTimesFlow
     val roomAchievements: Flow<List<com.example.data.room.Achievements>> = achievementsRepository.allAchievementsFlow
+    val achievementManager: com.example.data.AchievementManager = repository.achievementManager
+    val unlockedAchievementsFlow: Flow<List<com.example.data.room.Achievements>> = achievementManager.unlockedAchievementsFlow
+    val unlockedCountFlow: Flow<Int> = achievementManager.unlockedCountFlow
+    val replayManager: com.example.data.ReplayManager = repository.replayManager
     val roomDailyChallenges: Flow<List<com.example.data.room.DailyChallenges>> = dailyChallengesRepository.todayChallengesFlow
     val activeDailyChallenges: Flow<List<com.example.data.room.DailyChallenges>> = dailyChallengesRepository.activeChallengesFlow
 
@@ -124,6 +131,51 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             replaySelectedTrackId.value = trackId
         }
         navigateTo(AppScreen.REPLAY)
+    }
+
+    // Gemini Omni Flash Cinematic Video Highlight Integration
+    val cinematicHighlightService = GeminiCinematicHighlightService()
+    private val _cinematicHighlightState = MutableStateFlow<CinematicHighlightUiState>(CinematicHighlightUiState.Idle)
+    val cinematicHighlightState: StateFlow<CinematicHighlightUiState> = _cinematicHighlightState.asStateFlow()
+    val activeHighlightReel = MutableStateFlow<CinematicHighlightReel?>(null)
+    val showCinematicHighlightModal = MutableStateFlow(false)
+
+    fun generateCinematicHighlights(replay: com.example.data.room.ReplayStorage) {
+        viewModelScope.launch {
+            _cinematicHighlightState.value = CinematicHighlightUiState.AnalyzingTelemetry("Extracting physics inflection points...")
+            showCinematicHighlightModal.value = true
+            try {
+                _cinematicHighlightState.value = CinematicHighlightUiState.GeneratingWithGemini("Directing camera cuts with Gemini Omni Flash...")
+                val reel = cinematicHighlightService.generateHighlightReel(replay)
+                activeHighlightReel.value = reel
+                _cinematicHighlightState.value = CinematicHighlightUiState.Success(reel)
+            } catch (e: Exception) {
+                _cinematicHighlightState.value = CinematicHighlightUiState.Error(e.localizedMessage ?: "Failed to direct cinematic highlights")
+            }
+        }
+    }
+
+    fun generateHighlightsForCurrentTrack(trackId: String? = null) {
+        val targetTrack = trackId ?: replaySelectedTrackId.value
+        viewModelScope.launch {
+            _cinematicHighlightState.value = CinematicHighlightUiState.AnalyzingTelemetry("Loading track replay data...")
+            showCinematicHighlightModal.value = true
+            try {
+                val replay = replayManager.getBestReplayForTrack(targetTrack)
+                if (replay != null) {
+                    generateCinematicHighlights(replay)
+                } else {
+                    _cinematicHighlightState.value = CinematicHighlightUiState.Error("No replay recorded yet for track: $targetTrack")
+                }
+            } catch (e: Exception) {
+                _cinematicHighlightState.value = CinematicHighlightUiState.Error(e.localizedMessage ?: "Failed to load replay")
+            }
+        }
+    }
+
+    fun dismissCinematicHighlight() {
+        showCinematicHighlightModal.value = false
+        _cinematicHighlightState.value = CinematicHighlightUiState.Idle
     }
 
     fun claimRoomDailyChallenge(challengeId: String) = repository.claimRoomDailyChallenge(challengeId)
@@ -252,6 +304,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         activeCareerEvent = null
         activeGhostLap.value = if (enableGhost) repository.getGhostLap(track.id) else null
 
+        viewModelScope.launch {
+            if (enableGhost) {
+                try {
+                    val ghost = replayManager.loadGhostLapForTrack(track.id)
+                        ?: repository.getGhostLap(track.id)
+                    if (ghost != null) {
+                        activeGhostLap.value = ghost
+                    }
+                } catch (ignored: Exception) {}
+            } else {
+                activeGhostLap.value = null
+                replayManager.setActiveGhostLap(null)
+            }
+        }
+
         launchRace(track, weather, isDynamic = false)
     }
 
@@ -277,6 +344,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         postRaceResult.value = null
         latestUnlockedBadges.value = emptyList()
 
+        val playerVehicle = getCurrentVehicle()
+        replayManager.startRecordingSession(
+            trackId = track.id,
+            trackName = track.name,
+            vehicleId = playerVehicle.id,
+            vehicleName = playerVehicle.name,
+            weatherType = initialWeather.name
+        )
+
         val startWp = track.startWaypoint
         playerState.value = CarPhysicsState(
             x = startWp.x,
@@ -284,8 +360,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             headingDeg = 0f,
             currentGear = 1
         )
-
-        val playerVehicle = getCurrentVehicle()
 
         // Spawn AI opponents if career race
         if (!isTimeTrial) {
@@ -424,15 +498,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
 
-                    // 4. Ghost Car Sample & Player Frame Recording
+                    // 4. Ghost Car Sample & Player Frame Recording via ReplayManager
                     val currentGhost = activeGhostLap.value
                     if (currentGhost != null) {
                         ghostFrame.value = currentGhost.sampleAt(pState.currentLapTimeMs)
                     } else {
-                        ghostFrame.value = null
+                        ghostFrame.value = replayManager.sampleActiveGhost(pState.currentLapTimeMs)
                     }
 
-                    // Record player lap for new ghost
+                    // Record player lap physics telemetry in ReplayManager
+                    replayManager.recordPhysicsState(pState)
                     recordedLapFrames.add(
                         GhostFrame(
                             timeMs = pState.currentLapTimeMs,
@@ -475,7 +550,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 slipRatio = pState.tireSlipRatio,
                                 frictionCirclePct = pState.frictionCircleUtilizationPct,
                                 vLongMs = pState.localVLong,
-                                vLatMs = pState.localVLat
+                                vLatMs = pState.localVLat,
+                                engineTempC = pState.engineTempC,
+                                engineOilTempC = pState.engineOilTempC,
+                                tireWearFL = pState.tireWearFL,
+                                tireWearFR = pState.tireWearFR,
+                                tireWearRL = pState.tireWearRL,
+                                tireWearRR = pState.tireWearRR
                             )
                         )
                         _telemetryHistory.value = hist
@@ -526,10 +607,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         handleRaceFinish(pState)
                     }
 
-                    // In time trial, when completing a lap, check for record
+                    // In time trial, when completing a lap, capture and store race physics data in Room via ReplayManager
                     if (pState.lastLapTimeMs > 0L) {
                         val pb = profile.value.bestLapTimes[activeTrack.id] ?: Long.MAX_VALUE
-                        if (pState.lastLapTimeMs < pb) {
+                        val isPB = pState.lastLapTimeMs < pb
+                        val lapMs = pState.lastLapTimeMs
+                        val clean = cleanLap
+                        val vName = vehicle.name
+                        val tId = activeTrack.id
+
+                        viewModelScope.launch {
+                            try {
+                                val saveResult = replayManager.saveCompletedLap(
+                                    lapTimeMs = lapMs,
+                                    cleanLap = clean,
+                                    customVehicleName = vName
+                                )
+                                if (saveResult != null && (saveResult.isNewPersonalBest || isPB)) {
+                                    repository.recordBestLap(tId, lapMs, saveResult.ghostLap, vName)
+                                    activeGhostLap.value = saveResult.ghostLap
+                                }
+                            } catch (ignored: Exception) {}
+                        }
+
+                        if (isPB) {
                             val newGhost = GhostLap(
                                 trackId = activeTrack.id,
                                 carName = vehicle.name,
@@ -989,6 +1090,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stopRace() {
         raceLoopJob?.cancel()
+        replayManager.cancelRecordingSession()
         particleSystem.clear()
         if (sessionDistanceMeters > 0f) {
             repository.recordDistanceDriven(sessionDistanceMeters)
@@ -1044,7 +1146,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     tempRL = 91f + kotlin.math.sin(t * 1.3).toFloat() * 7f,
                     tempRR = 89f + kotlin.math.cos(t * 1.3).toFloat() * 7f,
                     gear = (spd / 45f).toInt().coerceIn(1, 5),
-                    downforceN = spd * 1.4f
+                    downforceN = spd * 1.4f,
+                    engineTempC = 86f + (spd / 200f) * 12f + kotlin.math.sin(t * 0.8f).toFloat() * 4f,
+                    engineOilTempC = 90f + (spd / 200f) * 10f,
+                    tireWearFL = (0.04f + (i * 0.0015f)).coerceIn(0f, 1f),
+                    tireWearFR = (0.035f + (i * 0.0014f)).coerceIn(0f, 1f),
+                    tireWearRL = (0.05f + (i * 0.0018f)).coerceIn(0f, 1f),
+                    tireWearRR = (0.048f + (i * 0.0017f)).coerceIn(0f, 1f)
                 )
             )
         }

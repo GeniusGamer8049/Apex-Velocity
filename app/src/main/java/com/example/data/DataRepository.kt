@@ -60,6 +60,7 @@ class DataRepository(
     val careerManager = careerProgressDao?.let { CareerManager(it, ioDispatcher) }
     val leaderboardManager = timeTrialRecordDao?.let { LeaderboardManager(it, ioDispatcher) }
     val achievementManager = achievementsDao?.let { AchievementManager(it, driverProfileDao, ioDispatcher) }
+    val replayManager = replayStorageDao?.let { ReplayManager(it, ioDispatcher) }
 
     // ========================================================================
     // Driver Profile APIs

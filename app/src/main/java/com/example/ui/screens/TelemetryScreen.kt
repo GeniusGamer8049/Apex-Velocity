@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.TelemetryPoint
 import com.example.model.Vehicle
+import com.example.ui.components.TelemetryDashboard
 import com.example.ui.telemetry.FourWheelThermalMap
 import com.example.ui.telemetry.GForceFrictionCircle
 import com.example.ui.telemetry.SpeedRpmChart
@@ -208,6 +209,15 @@ fun TelemetryScreen(
                     modifier = Modifier.weight(1f)
                 )
             }
+        }
+
+        // Recharts Interactive Telemetry Dashboard Component
+        item {
+            TelemetryDashboard(
+                vehicle = vehicle,
+                telemetryHistory = telemetryHistory,
+                isOverlay = false
+            )
         }
 
         // Speed & RPM Line and Area Chart

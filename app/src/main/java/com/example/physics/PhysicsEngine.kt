@@ -65,8 +65,16 @@ data class CarPhysicsState(
     var corneringForceN: Float = 0f,
     var tractionForceN: Float = 0f,
     var localVLong: Float = 0f,
-    var localVLat: Float = 0f
+    var localVLat: Float = 0f,
+    // Real-Time Engine Thermal & Tire Wear Telemetry
+    var engineTempC: Float = 88.5f,
+    var engineOilTempC: Float = 92.0f,
+    var tireWearFL: Float = 0.04f, // 0.0f (fresh 100%) to 1.0f (worn 0%)
+    var tireWearFR: Float = 0.04f,
+    var tireWearRL: Float = 0.04f,
+    var tireWearRR: Float = 0.04f
 )
+
 
 class PhysicsEngine(
     val integrationModule: PhysicsIntegrationModule = PhysicsIntegrationModule()
@@ -208,6 +216,25 @@ class PhysicsEngine(
         state.tireTempFR = state.tireTempFR.coerceIn(45f, 145f)
         state.tireTempRL = state.tireTempRL.coerceIn(45f, 145f)
         state.tireTempRR = state.tireTempRR.coerceIn(45f, 145f)
+
+        // Engine Thermal Dynamics (Coolant & Oil Temperatures)
+        val engineLoadHeat = (throttleInput * (state.rpm / 8500f) * 14.5f) + (if (state.isBoosting) 18.0f else 0f)
+        val radiatorAirflowCooling = (speedMs / 45f) * 8.5f + 2.0f
+        val engineTempTarget = 88.0f + (throttleInput * 22f) + ((state.rpm / 8500f) * 12f)
+        state.engineTempC += (engineLoadHeat - radiatorAirflowCooling + (engineTempTarget - state.engineTempC) * 0.08f) * dt
+        state.engineTempC = state.engineTempC.coerceIn(70f, 130f)
+        state.engineOilTempC += ((state.engineTempC - state.engineOilTempC) * 0.05f) * dt
+        state.engineOilTempC = state.engineOilTempC.coerceIn(75f, 135f)
+
+        // 4-Corner Dynamic Tire Wear & Degradation (0..1 percentage worn)
+        val compoundWearMultiplier = vehicle.upgrades.tireCompound.wearRate
+        val baseWearRate = (speedMs / 70f) * 0.00018f * compoundWearMultiplier
+        val turnWearFront = (abs(state.lateralG) * 0.0006f + (if (state.isBraking) brakeInput * 0.0008f else 0f)) * compoundWearMultiplier
+        val driveWearRear = (if (state.isDrifting) abs(state.slipAngleDeg) * 0.00035f else 0f) + (if (state.isWheelSpinning) 0.0012f else 0f)
+        state.tireWearFL = (state.tireWearFL + (baseWearRate + turnWearFront * (if (state.localVLat < 0) 1.35f else 0.75f)) * dt).coerceIn(0f, 1f)
+        state.tireWearFR = (state.tireWearFR + (baseWearRate + turnWearFront * (if (state.localVLat > 0) 1.35f else 0.75f)) * dt).coerceIn(0f, 1f)
+        state.tireWearRL = (state.tireWearRL + (baseWearRate + driveWearRear * (if (state.localVLat < 0) 1.25f else 0.8f)) * dt).coerceIn(0f, 1f)
+        state.tireWearRR = (state.tireWearRR + (baseWearRate + driveWearRear * (if (state.localVLat > 0) 1.25f else 0.8f)) * dt).coerceIn(0f, 1f)
 
         // Drift state & scoring
         if (state.isDrifting) {

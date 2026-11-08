@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AttachMoney
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.EmojiEvents
@@ -87,7 +88,8 @@ fun PostRaceSummaryScreen(
     onStartNextEvent: ((CareerRaceEvent) -> Unit)? = null,
     onGoToGarage: () -> Unit,
     onViewLeaderboard: ((String) -> Unit)? = null,
-    onOpenAchievements: (() -> Unit)? = null
+    onOpenAchievements: (() -> Unit)? = null,
+    onWatchHighlights: (() -> Unit)? = null
 ) {
     BackHandler {
         onContinueToCareer()
@@ -977,6 +979,30 @@ fun PostRaceSummaryScreen(
                         ) {
                             Icon(Icons.Default.Home, contentDescription = null, modifier = Modifier.size(16.dp))
                             Text("CAREER HUB", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                // AI Director Video Generation Action: Gemini Omni Flash Highlights
+                if (onWatchHighlights != null) {
+                    Button(
+                        onClick = onWatchHighlights,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("post_race_gemini_highlight_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = ApexCyan,
+                            contentColor = CarbonBlack
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = CarbonBlack, modifier = Modifier.size(18.dp))
+                            Text("WATCH GEMINI CINEMATIC HIGHLIGHTS", fontWeight = FontWeight.Black, fontSize = 12.sp)
                         }
                     }
                 }

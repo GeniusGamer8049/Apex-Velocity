@@ -85,6 +85,7 @@ import com.example.ui.theme.TextWhite
 fun GarageScreen(
     profile: PlayerProfile,
     dailyChallenges: List<DailyChallenges> = emptyList(),
+    unlockedAchievements: List<com.example.data.room.Achievements> = emptyList(),
     onSelectVehicle: (String) -> Unit,
     onPurchaseVehicle: (String) -> Unit,
     onUpgradeVehicle: (String, String) -> Unit,
@@ -359,6 +360,111 @@ fun GarageScreen(
                 onViewFullLeaderboard = onOpenLeaderboard,
                 modifier = Modifier.fillMaxWidth()
             )
+        }
+
+        // Unlocked Achievements & Milestones Showcase
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("unlocked_achievements_section"),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.MilitaryTech, contentDescription = null, tint = ApexGold, modifier = Modifier.size(18.dp))
+                            Text(
+                                text = "UNLOCKED ACHIEVEMENTS & MILESTONES",
+                                color = TextWhite,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(DarkSurfaceElevated)
+                                .border(1.dp, ApexGold, RoundedCornerShape(6.dp))
+                                .clickable { onOpenAchievements() }
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = "${unlockedAchievements.size} UNLOCKED",
+                                color = ApexGold,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+
+                    if (unlockedAchievements.isEmpty()) {
+                        Text(
+                            text = "Complete your first race win or reach 250 km/h to unlock milestone rewards!",
+                            color = TextMuted,
+                            fontSize = 11.sp
+                        )
+                    } else {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(unlockedAchievements) { ach ->
+                                Box(
+                                    modifier = Modifier
+                                        .width(135.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(DarkSurfaceElevated)
+                                        .border(1.dp, ApexGold.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                        .clickable { onOpenAchievements() }
+                                        .padding(8.dp)
+                                ) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                        Text(
+                                            text = ach.title,
+                                            color = TextWhite,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1
+                                        )
+                                        Text(
+                                            text = ach.category,
+                                            color = ApexCyan,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "+$${ach.rewardCredits}",
+                                                color = ApexGreen,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Black,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                            Text(
+                                                text = "+${ach.rewardRep} REP",
+                                                color = ApexGold,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Black,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Section Tabs: Performance Upgrades vs Customization Paint
