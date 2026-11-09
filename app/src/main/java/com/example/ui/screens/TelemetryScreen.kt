@@ -24,6 +24,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import java.util.Locale
+import kotlin.math.abs
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,6 +54,8 @@ import com.example.ui.theme.SurfaceBorder
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextWhite
 
+import com.example.physics.simulation2d.VehicleSimulation2DTelemetry
+import com.example.physics.simulation2d.WheelId2D
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 
@@ -59,6 +63,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 fun TelemetryScreen(
     vehicle: Vehicle,
     telemetryHistory: List<TelemetryPoint>,
+    simulation2DTelemetry: VehicleSimulation2DTelemetry? = null,
     onBack: () -> Unit,
     onOpenPerformanceAnalytics: () -> Unit = {}
 ) {
@@ -211,11 +216,12 @@ fun TelemetryScreen(
             }
         }
 
-        // Recharts Interactive Telemetry Dashboard Component
+        // Recharts & Custom Canvas Interactive Telemetry Dashboard Component
         item {
             TelemetryDashboard(
                 vehicle = vehicle,
                 telemetryHistory = telemetryHistory,
+                simulation2DTelemetry = simulation2DTelemetry,
                 isOverlay = false
             )
         }
@@ -359,6 +365,133 @@ fun TelemetryScreen(
                                 value = "${(current?.frictionCirclePct ?: 0f).toInt()}%",
                                 sub = "Combined Adhesion",
                                 color = if ((current?.frictionCirclePct ?: 0f) > 90f) ApexRed else ApexCyan,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2D Physics Simulation Structure Card (JBox2D Rigid-Body, Aero Drag, and Pacejka Tire Friction)
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("simulation_2d_telemetry_card"),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, ApexCyan.copy(alpha = 0.5f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "2D PHYSICS SIMULATION (JBox2D)",
+                            color = ApexCyan,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(DarkSurfaceElevated)
+                                .border(1.dp, ApexGreen, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text("ACTIVE 60Hz SOLVER", color = ApexGreen, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    val simAero = simulation2DTelemetry?.aeroTelemetry
+                    val simTires = simulation2DTelemetry?.tireTelemetry
+                    val simBody = simulation2DTelemetry?.bodyState
+
+                    // Aerodynamic Drag & Downforce Breakdown
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("AERODYNAMIC DRAG & DOWNFORCE (0.5 * ρ * Cd * A * v²)", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PhysicsMiniStat(
+                                label = "AERO DRAG",
+                                value = simAero?.formattedDragForce ?: "${current?.frictionDragN?.toInt() ?: 0} N",
+                                sub = simAero?.formattedDragPower ?: "Opposing Force",
+                                color = ApexGold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            PhysicsMiniStat(
+                                label = "DOWNFORCE",
+                                value = simAero?.formattedDownforce ?: "${downforce} N",
+                                sub = "Normal Grip Aid",
+                                color = ApexCyan,
+                                modifier = Modifier.weight(1f)
+                            )
+                            PhysicsMiniStat(
+                                label = "AIR DENSITY",
+                                value = String.format(Locale.US, "%.3f", simAero?.airDensityKgM3 ?: 1.225f),
+                                sub = "kg/m³ (Weather)",
+                                color = TextWhite,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    // 4-Wheel Contact Patch Tire Friction & Normal Load
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("4-WHEEL TIRE FRICTION & DYNAMIC LOAD TRANSFER", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PhysicsMiniStat(
+                                label = "FRONT LOAD",
+                                value = String.format(Locale.US, "%.0f N", ((simTires?.wheels?.get(WheelId2D.FRONT_LEFT)?.normalLoadN ?: 3500f) + (simTires?.wheels?.get(WheelId2D.FRONT_RIGHT)?.normalLoadN ?: 3500f))),
+                                sub = "Dynamic Axle Load",
+                                color = ApexGreen,
+                                modifier = Modifier.weight(1f)
+                            )
+                            PhysicsMiniStat(
+                                label = "REAR LOAD",
+                                value = String.format(Locale.US, "%.0f N", ((simTires?.wheels?.get(WheelId2D.REAR_LEFT)?.normalLoadN ?: 3300f) + (simTires?.wheels?.get(WheelId2D.REAR_RIGHT)?.normalLoadN ?: 3300f))),
+                                sub = "Weight Transfer",
+                                color = ApexOrange,
+                                modifier = Modifier.weight(1f)
+                            )
+                            PhysicsMiniStat(
+                                label = "CORNERING",
+                                value = simTires?.formattedCorneringForce ?: "0 N",
+                                sub = "Pacejka Magic F.",
+                                color = ApexCyan,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    // JBox2D Rigid-Body Dynamic Kinematics
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("JBox2D CHASSIS DYNAMICS & YAW KINEMATICS", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PhysicsMiniStat(
+                                label = "WORLD VELOCITY",
+                                value = String.format(Locale.US, "(%.1f, %.1f)", simBody?.vxMps ?: (current?.speedKmh ?: 0f) / 3.6f, simBody?.vyMps ?: 0f),
+                                sub = "m/s (Global)",
+                                color = TextWhite,
+                                modifier = Modifier.weight(1f)
+                            )
+                            PhysicsMiniStat(
+                                label = "YAW RATE",
+                                value = String.format(Locale.US, "%+.1f°/s", simBody?.angularVelocityDegPerSec ?: 0f),
+                                sub = "Chassis Rotation",
+                                color = if (abs(simBody?.angularVelocityDegPerSec ?: 0f) > 25f) ApexOrange else ApexCyan,
+                                modifier = Modifier.weight(1f)
+                            )
+                            PhysicsMiniStat(
+                                label = "DRIFT STATE",
+                                value = if (simTires?.isDrifting == true) "DRIFTING" else "TRACTION",
+                                sub = if (simTires?.isDrifting == true) "Slip > Peak" else "Adhesion OK",
+                                color = if (simTires?.isDrifting == true) ApexRed else ApexGreen,
                                 modifier = Modifier.weight(1f)
                             )
                         }

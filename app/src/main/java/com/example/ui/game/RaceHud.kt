@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Warning
 import com.example.model.TelemetryPoint
 import com.example.model.Vehicle
 import com.example.model.VehicleRegistry
+import com.example.physics.simulation2d.VehicleSimulation2DTelemetry
 import com.example.ui.components.TelemetryDashboard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -105,7 +106,8 @@ fun RaceHud(
     onWeatherSelected: (WeatherCondition) -> Unit = {},
     onRandomizeWeather: (() -> Unit)? = null,
     telemetryHistory: List<TelemetryPoint> = emptyList(),
-    currentVehicle: Vehicle? = null
+    currentVehicle: Vehicle? = null,
+    simulation2DTelemetry: VehicleSimulation2DTelemetry? = null
 ) {
     var showTelemetry by remember { mutableStateOf(false) }
 
@@ -328,6 +330,7 @@ fun RaceHud(
                 vehicle = vehicle,
                 telemetryHistory = telemetryHistory,
                 playerState = playerState,
+                simulation2DTelemetry = simulation2DTelemetry,
                 isOverlay = true,
                 onDismiss = { showTelemetry = false }
             )

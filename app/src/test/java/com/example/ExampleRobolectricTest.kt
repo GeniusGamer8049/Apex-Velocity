@@ -3174,7 +3174,133 @@ class ExampleRobolectricTest {
             assertTrue("Commentary generated", reel.overallDirectorSummary.isNotBlank())
         }
     }
+
+    @Test
+    fun `test local track record entity formatting and progression deltas`() {
+        val record = com.example.data.room.LocalTrackRecord(
+            trackId = "monaco_riviera",
+            trackName = "Monaco Riviera Grand Prix",
+            bestLapTimeMs = 52400L,
+            bestLapVehicleId = "apex_gt86",
+            bestLapVehicleName = "Apex GT-86 Coupe",
+            topSpeedKmh = 198.5f,
+            totalLapsCompleted = 10,
+            totalRacesFinished = 4,
+            totalWins = 2,
+            totalPodiums = 3,
+            isCleanLap = true,
+            weatherCondition = "SUNNY_CLEAR",
+            previousBestLapTimeMs = 54100L
+        )
+
+        assertEquals("00:52.400", record.formattedBestLapTime)
+        assertEquals("00:54.100", record.formattedPreviousBestLapTime)
+        assertEquals(1700L, record.improvementDeltaMs)
+        assertEquals("-1.700s", record.formattedImprovement)
+        assertEquals(50f, record.winRatePercent, 0.01f)
+        assertEquals(75f, record.podiumRatePercent, 0.01f)
+    }
+
+    @Test
+    fun `test local track record dao database queries and flow emission`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = com.example.data.room.AppDatabase.getDatabase(context)
+        val dao = db.localTrackRecordDao()
+
+        kotlinx.coroutines.runBlocking {
+            dao.deleteAllRecords()
+            val initialCount = dao.getRecordCount()
+            assertEquals(0, initialCount)
+
+            val defaults = com.example.data.room.LocalTrackRecord.createDefaultRecords()
+            dao.insertRecords(defaults)
+
+            val countAfterInsert = dao.getRecordCount()
+            assertEquals(defaults.size, countAfterInsert)
+
+            val monaco = dao.getTrackRecord("monaco_riviera")
+            assertNotNull(monaco)
+            assertEquals("Monaco Riviera Grand Prix", monaco!!.trackName)
+
+            // Test reactive Flow emission
+            val allRecords = dao.getAllTrackRecordsFlow().first()
+            assertEquals(defaults.size, allRecords.size)
+
+            // Test fastest tracks flow
+            val fastest = dao.getFastestTracksFlow().first()
+            assertTrue("Sorted by lap time", fastest.first().bestLapTimeMs <= fastest.last().bestLapTimeMs)
+
+            // Update record
+            val updatedMonaco = monaco.copy(bestLapTimeMs = 51200L, topSpeedKmh = 205.0f)
+            dao.insertRecord(updatedMonaco)
+
+            val reloaded = dao.getTrackRecord("monaco_riviera")
+            assertEquals(51200L, reloaded!!.bestLapTimeMs)
+            assertEquals(205.0f, reloaded.topSpeedKmh, 0.01f)
+
+            // Delete
+            dao.deleteRecord("monaco_riviera")
+            val deleted = dao.getTrackRecord("monaco_riviera")
+            assertNull(deleted)
+        }
+    }
+
+    @Test
+    fun `test local track record repository personal best recording and improvement tracking`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val repository = com.example.data.LocalTrackRecordRepository(context)
+
+        kotlinx.coroutines.runBlocking {
+            repository.resetToDefaultRecords()
+
+            val existing = repository.getTrackRecord("monaco_riviera")
+            assertNotNull(existing)
+            val baselineBest = existing!!.bestLapTimeMs
+
+            // 1. Record a faster lap time (Personal Best)
+            val fasterTime = baselineBest - 1500L
+            val resultPB = repository.recordLapTime(
+                trackId = "monaco_riviera",
+                trackName = "Monaco Riviera Grand Prix",
+                lapTimeMs = fasterTime,
+                vehicleId = "hyperion_gtr",
+                vehicleName = "Hyperion GT-R",
+                topSpeedKmh = 215.0f,
+                isClean = true,
+                isWin = true,
+                isPodium = true,
+                weather = "SUNNY_CLEAR"
+            )
+
+            assertTrue("Must report new personal best", resultPB.isNewPersonalBest)
+            assertEquals(baselineBest, resultPB.previousBestLapTimeMs)
+            assertEquals(1500L, resultPB.improvementDeltaMs)
+            assertEquals(fasterTime, resultPB.record.bestLapTimeMs)
+            assertEquals("Hyperion GT-R", resultPB.record.bestLapVehicleName)
+            assertEquals(existing.totalLapsCompleted + 1, resultPB.record.totalLapsCompleted)
+
+            // 2. Record a slower lap time
+            val slowerTime = fasterTime + 2000L
+            val resultSlower = repository.recordLapTime(
+                trackId = "monaco_riviera",
+                trackName = "Monaco Riviera Grand Prix",
+                lapTimeMs = slowerTime,
+                vehicleId = "hyperion_gtr",
+                vehicleName = "Hyperion GT-R",
+                topSpeedKmh = 210.0f,
+                isClean = true,
+                isWin = false,
+                isPodium = false,
+                weather = "SUNNY_CLEAR"
+            )
+
+            assertFalse("Slower lap should not be personal best", resultSlower.isNewPersonalBest)
+            assertEquals(fasterTime, resultSlower.record.bestLapTimeMs) // PB maintained
+            assertEquals(resultPB.record.totalLapsCompleted + 1, resultSlower.record.totalLapsCompleted)
+        }
+    }
 }
+
 
 
 

@@ -72,6 +72,7 @@ import androidx.compose.ui.unit.sp
 import com.example.model.TelemetryPoint
 import com.example.model.Vehicle
 import com.example.physics.CarPhysicsState
+import com.example.physics.simulation2d.VehicleSimulation2DTelemetry
 import com.example.ui.theme.ApexCyan
 import com.example.ui.theme.ApexGold
 import com.example.ui.theme.ApexGreen
@@ -92,6 +93,7 @@ import kotlin.math.min
  * Metric categories available in the TelemetryDashboard.
  */
 enum class TelemetryMetricCategory(val title: String, val shortLabel: String) {
+    JBOX2D_CANVAS("JBox2D Physics & Canvas", "JBox2D Gauges"),
     OVERVIEW("Overview & Synchronized", "Overview"),
     VELOCITY("Velocity & Acceleration", "Velocity"),
     ENGINE_TEMP("Engine Thermal", "Engine Temp"),
@@ -100,9 +102,10 @@ enum class TelemetryMetricCategory(val title: String, val shortLabel: String) {
 
 /**
  * TelemetryDashboard: A high-performance real-time telemetry visualizer component
- * inspired by Recharts/D3 charting paradigms.
+ * inspired by Recharts/D3 charting paradigms and custom Canvas instruments.
  *
  * Visualizes live racing telemetry during active gameplay, including:
+ * - JBox2D physics engine state: speedometer, tachometer, thermal gauge, and multi-trace waveform.
  * - Real-time vehicle velocity, acceleration, and lateral/longitudinal drift decomposition.
  * - Engine coolant and oil temperature dynamics with thermal load and overheating alerts.
  * - 4-corner tire wear and tread degradation curves with remaining life percentages.
@@ -112,12 +115,13 @@ fun TelemetryDashboard(
     vehicle: Vehicle,
     telemetryHistory: List<TelemetryPoint>,
     playerState: CarPhysicsState? = null,
+    simulation2DTelemetry: VehicleSimulation2DTelemetry? = null,
     isOverlay: Boolean = false,
     onDismiss: (() -> Unit)? = null,
     onToggleFullscreen: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    var selectedCategory by remember { mutableStateOf(TelemetryMetricCategory.OVERVIEW) }
+    var selectedCategory by remember { mutableStateOf(TelemetryMetricCategory.JBOX2D_CANVAS) }
     var isExpanded by remember { mutableStateOf(true) }
     var scrubRatio by remember { mutableFloatStateOf(-1f) } // -1f means live current stream
 
@@ -194,6 +198,14 @@ fun TelemetryDashboard(
 
             // 4. Main Recharts Data Visualizer Content
             when (selectedCategory) {
+                TelemetryMetricCategory.JBOX2D_CANVAS -> {
+                    JBox2DPhysicsDashboardView(
+                        vehicle = vehicle,
+                        telemetryHistory = telemetryHistory,
+                        playerState = playerState,
+                        simulation2DTelemetry = simulation2DTelemetry
+                    )
+                }
                 TelemetryMetricCategory.OVERVIEW -> {
                     OverviewRechartsView(
                         telemetryHistory = telemetryHistory,
@@ -500,6 +512,7 @@ private fun TelemetryCategoryTabs(
         TelemetryMetricCategory.values().forEach { category ->
             val isSelected = selectedCategory == category
             val testTagStr = when (category) {
+                TelemetryMetricCategory.JBOX2D_CANVAS -> "telemetry_jbox2d_tab"
                 TelemetryMetricCategory.OVERVIEW -> "telemetry_overview_tab"
                 TelemetryMetricCategory.VELOCITY -> "telemetry_velocity_tab"
                 TelemetryMetricCategory.ENGINE_TEMP -> "telemetry_engine_temp_tab"

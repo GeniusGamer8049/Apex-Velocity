@@ -20,11 +20,14 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -52,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.PlayerProfile
 import com.example.data.room.TimeTrialRecord
+import com.example.data.room.LocalTrackRecord
 import com.example.model.GhostLap
 import com.example.model.Track
 import com.example.model.TrackRegistry
@@ -76,7 +80,8 @@ fun TimeTrialScreen(
     onStartTimeTrial: (track: Track, weather: WeatherType, enableGhost: Boolean) -> Unit,
     onViewLeaderboard: ((trackId: String) -> Unit)? = null,
     onOpenReplayViewer: (trackId: String) -> Unit = {},
-    timeTrialRecordsProvider: ((String) -> Flow<List<TimeTrialRecord>>)? = null
+    timeTrialRecordsProvider: ((String) -> Flow<List<TimeTrialRecord>>)? = null,
+    trackRecordProvider: ((String) -> Flow<LocalTrackRecord?>)? = null
 ) {
     var selectedTrackId by remember { mutableStateOf("monaco_riviera") }
     var selectedWeather by remember { mutableStateOf(WeatherType.SUNNY_CLEAR) }
@@ -86,6 +91,11 @@ fun TimeTrialScreen(
         timeTrialRecordsProvider?.invoke(selectedTrackId) ?: flowOf(emptyList())
     }
     val timeTrialRecords by timeTrialRecordsFlow.collectAsState(initial = emptyList())
+
+    val trackRecordFlow = remember(selectedTrackId, trackRecordProvider) {
+        trackRecordProvider?.invoke(selectedTrackId) ?: flowOf(null)
+    }
+    val localTrackRecord by trackRecordFlow.collectAsState(initial = null)
 
     val track = TrackRegistry.getTrackById(selectedTrackId)
     val bestLapTime = profile.bestLapTimes[selectedTrackId]
@@ -263,6 +273,171 @@ fun TimeTrialScreen(
                             Text(text = currentVehicle.name, color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             Text(text = "${currentVehicle.effectiveBhp} BHP • ${currentVehicle.effectiveTopSpeedKmh} km/h • ${currentVehicle.upgrades.tireCompound.displayName}", color = TextMuted, fontSize = 11.sp)
                         }
+                    }
+                }
+            }
+        }
+
+        // Player Local Track Record & Best Lap Times Progression Card
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, ApexCyan.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                    .testTag("local_track_record_card"),
+                colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated)
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.TrendingUp, contentDescription = null, tint = ApexCyan, modifier = Modifier.size(18.dp))
+                            Text(
+                                text = "LOCAL TRACK RECORD & PROGRESS",
+                                color = TextWhite,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+
+                        if (localTrackRecord != null && localTrackRecord!!.isCleanLap) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(ApexGreen.copy(alpha = 0.2f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text("CLEAN RECORD", color = ApexGreen, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    if (localTrackRecord != null) {
+                        val record = localTrackRecord!!
+                        // Best Lap and Improvement Row
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(DarkSurface)
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text("CIRCUIT BEST LAP", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = record.formattedBestLapTime,
+                                    color = ApexGold,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    text = "Driven in: ${record.bestLapVehicleName}",
+                                    color = TextWhite,
+                                    fontSize = 11.sp
+                                )
+                            }
+
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("PROGRESSION DELTA", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = record.formattedImprovement,
+                                    color = if (record.improvementDeltaMs != null && record.improvementDeltaMs!! > 0) ApexGreen else ApexCyan,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                if (record.previousBestLapTimeMs != null) {
+                                    Text(
+                                        text = "Prev: ${record.formattedPreviousBestLapTime}",
+                                        color = TextMuted,
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                        }
+
+                        // Grid of Metrics: Top Speed, Laps Completed, Win Rate
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(DarkSurface)
+                                    .padding(8.dp)
+                            ) {
+                                Column {
+                                    Text("TOP SPEED", color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = "${record.topSpeedKmh.toInt()} KM/H",
+                                        color = TextWhite,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(DarkSurface)
+                                    .padding(8.dp)
+                            ) {
+                                Column {
+                                    Text("LAPS COMPLETED", color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = "${record.totalLapsCompleted} LAPS",
+                                        color = ApexCyan,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(DarkSurface)
+                                    .padding(8.dp)
+                            ) {
+                                Column {
+                                    Text("TRACK PODIUMS", color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = "${record.totalPodiums} (${record.winRatePercent.toInt()}%)",
+                                        color = ApexGold,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = "No local track record yet for this circuit. Complete a lap to track your progress!",
+                            color = TextMuted,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
                     }
                 }
             }

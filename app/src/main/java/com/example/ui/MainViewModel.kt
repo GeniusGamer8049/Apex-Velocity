@@ -31,6 +31,8 @@ import com.example.physics.RaceWeatherCondition
 import com.example.physics.AdjustedVehiclePhysics
 import com.example.physics.ParticleSystem
 import com.example.physics.PhysicsEngine
+import com.example.physics.simulation2d.VehicleSimulation2D
+import com.example.physics.simulation2d.VehicleSimulation2DTelemetry
 import com.example.model.Achievement
 import com.example.model.ChallengeType
 import com.example.model.TelemetryPoint
@@ -122,6 +124,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun getTimeTrialTrackRecord(trackId: String): Flow<com.example.data.room.TimeTrialRecord?> =
         leaderboardManager.getTrackRecordFlow(trackId)
 
+    // Local Track Records & Best Lap Times Progression (Room Persistence)
+    val localTrackRecordRepository: com.example.data.LocalTrackRecordRepository = repository.localTrackRecordRepository
+    val allLocalTrackRecords: Flow<List<com.example.data.room.LocalTrackRecord>> = localTrackRecordRepository.allTrackRecordsFlow
+    val fastestTrackRecords: Flow<List<com.example.data.room.LocalTrackRecord>> = localTrackRecordRepository.fastestTracksFlow
+    val recentlyDrivenTracks: Flow<List<com.example.data.room.LocalTrackRecord>> = localTrackRecordRepository.recentlyDrivenTracksFlow
+
+    fun getLocalTrackRecordForTrack(trackId: String): Flow<com.example.data.room.LocalTrackRecord?> =
+        localTrackRecordRepository.getTrackRecordFlow(trackId)
+
     fun selectReplayTrack(trackId: String) {
         replaySelectedTrackId.value = trackId
     }
@@ -212,6 +223,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val raceDurationMillis = MutableStateFlow(0L)
     val isCountdownActive = MutableStateFlow(true)
     val latestUnlockedBadges = MutableStateFlow<List<Achievement>>(emptyList())
+
+    val simulation2D: VehicleSimulation2D get() = physicsEngine.simulation2D
+    val simulation2DTelemetry = MutableStateFlow<VehicleSimulation2DTelemetry?>(null)
 
     private val _telemetryHistory = MutableStateFlow<List<TelemetryPoint>>(createInitialTelemetry())
     val telemetryHistory: StateFlow<List<TelemetryPoint>> = _telemetryHistory.asStateFlow()
@@ -360,6 +374,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             headingDeg = 0f,
             currentGear = 1
         )
+        physicsEngine.resetSimulation(startWp.x, startWp.y, 0f, playerVehicle)
 
         // Spawn AI opponents if career race
         if (!isTimeTrial) {
@@ -521,6 +536,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                     // 5. Update Particles
                     particleSystem.update(dt)
+                    simulation2DTelemetry.value = physicsEngine.simulation2D.latestTelemetry
 
                     // 5b. Sample Real-Time Telemetry
                     telemetrySampleAccumulator += dt
@@ -627,6 +643,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                     repository.recordBestLap(tId, lapMs, saveResult.ghostLap, vName)
                                     activeGhostLap.value = saveResult.ghostLap
                                 }
+                                localTrackRecordRepository.recordLapTime(
+                                    trackId = tId,
+                                    trackName = activeTrack.name,
+                                    lapTimeMs = lapMs,
+                                    vehicleId = vehicle.id,
+                                    vehicleName = vName,
+                                    topSpeedKmh = pState.speedKmh,
+                                    isClean = clean,
+                                    isWin = false,
+                                    isPodium = false,
+                                    weather = weatherState.value.currentWeather.name
+                                )
                             } catch (ignored: Exception) {}
                         }
 
@@ -961,6 +989,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     careerEventId = event?.id
                 )
                 latestCareerUpdate.value = careerRes
+                localTrackRecordRepository.recordLapTime(
+                    trackId = activeTrack.id,
+                    trackName = activeTrack.name,
+                    lapTimeMs = pState.bestLapTimeMs,
+                    vehicleId = vehicle.id,
+                    vehicleName = vehicle.name,
+                    topSpeedKmh = postResult.topSpeedKmh,
+                    isClean = cleanLap,
+                    isWin = pos == 1,
+                    isPodium = pos <= 3,
+                    weather = weatherState.value.currentWeather.name
+                )
             } catch (e: Exception) {
                 android.util.Log.e("MainViewModel", "Error processing career progression in Room", e)
             }

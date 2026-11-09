@@ -101,6 +101,8 @@ class RacingRepository(private val context: Context) {
     val careerManager: CareerManager = CareerManager(careerProgressDao)
     val timeTrialRecordDao: TimeTrialRecordDao = appDb.timeTrialRecordDao()
     val leaderboardManager: LeaderboardManager = LeaderboardManager(timeTrialRecordDao)
+    val localTrackRecordDao: com.example.data.room.LocalTrackRecordDao = appDb.localTrackRecordDao()
+    val localTrackRecordRepository: LocalTrackRecordRepository = LocalTrackRecordRepository(localTrackRecordDao)
     val achievementManager: AchievementManager = AchievementManager(achievementsDao, driverProfileDao)
     val replayManager: ReplayManager = ReplayManager(replayStorageDao)
     val dataRepository: DataRepository = DataRepository(
@@ -111,7 +113,8 @@ class RacingRepository(private val context: Context) {
         globalLeaderboardsDao = globalLeaderboardsDao,
         replayStorageDao = replayStorageDao,
         careerProgressDao = careerProgressDao,
-        timeTrialRecordDao = timeTrialRecordDao
+        timeTrialRecordDao = timeTrialRecordDao,
+        localTrackRecordDao = localTrackRecordDao
     )
     val driverProfileRepository: DriverProfileRepository = dataRepository.driverProfileRepository
     val gameStatisticsRepository: GameStatisticsRepository = dataRepository.gameStatisticsRepository
@@ -152,6 +155,9 @@ class RacingRepository(private val context: Context) {
             } catch (ignored: Exception) {}
             try {
                 leaderboardManager.ensureDefaultRecords()
+            } catch (ignored: Exception) {}
+            try {
+                localTrackRecordRepository.ensureDefaultRecords()
             } catch (ignored: Exception) {}
         }
     }

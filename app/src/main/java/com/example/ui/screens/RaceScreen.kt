@@ -113,7 +113,8 @@ fun RaceScreen(
             onWeatherSelected = { viewModel.setWeatherCondition(it) },
             onRandomizeWeather = { viewModel.triggerRandomRaceWeather() },
             telemetryHistory = telemetryHistory,
-            currentVehicle = currentVehicle
+            currentVehicle = currentVehicle,
+            simulation2DTelemetry = viewModel.simulation2DTelemetry.collectAsState().value ?: viewModel.simulation2D.latestTelemetry
         )
 
         // 3. Pre-Race 3-2-1 Countdown Sequence
@@ -150,9 +151,11 @@ fun RaceScreen(
 
         // Live Telemetry & Performance Screen Overlay
         if (showTelemetryScreen) {
+            val sim2DTelemetry by viewModel.simulation2DTelemetry.collectAsState()
             TelemetryScreen(
                 vehicle = currentVehicle,
                 telemetryHistory = telemetryHistory,
+                simulation2DTelemetry = sim2DTelemetry ?: viewModel.simulation2D.latestTelemetry,
                 onBack = { showTelemetryScreen = false }
             )
         }

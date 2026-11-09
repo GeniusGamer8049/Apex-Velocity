@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.apexvelocity.qrvw"
     minSdk = 24
     targetSdk = 36
-    versionCode = 8
-    versionName = "8.0"
+    versionCode = 9
+    versionName = "9.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -130,6 +130,7 @@ dependencies {
   implementation(libs.okhttp)
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
+  implementation(libs.jbox2d)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)

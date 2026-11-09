@@ -18,6 +18,8 @@ import com.example.data.room.CareerProgress
 import com.example.data.room.CareerProgressDao
 import com.example.data.room.TimeTrialRecord
 import com.example.data.room.TimeTrialRecordDao
+import com.example.data.room.LocalTrackRecord
+import com.example.data.room.LocalTrackRecordDao
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -26,7 +28,7 @@ import kotlinx.coroutines.withContext
 /**
  * Data Repository class that abstracts Room database operations from the UI layer,
  * providing a clean, thread-safe, reactive API for accessing and persisting
- * [DriverProfile], [GameStatistics], [Achievements], [DailyChallenges], [GlobalLeaderboards], [CareerProgress], and [TimeTrialRecord] data.
+ * [DriverProfile], [GameStatistics], [Achievements], [DailyChallenges], [GlobalLeaderboards], [CareerProgress], [TimeTrialRecord], and [LocalTrackRecord] data.
  */
 class DataRepository(
     val driverProfileDao: DriverProfileDao,
@@ -37,6 +39,7 @@ class DataRepository(
     val replayStorageDao: ReplayStorageDao? = null,
     val careerProgressDao: CareerProgressDao? = null,
     val timeTrialRecordDao: TimeTrialRecordDao? = null,
+    val localTrackRecordDao: LocalTrackRecordDao? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) {
 
@@ -48,7 +51,8 @@ class DataRepository(
         globalLeaderboardsDao = AppDatabase.getDatabase(context).globalLeaderboardsDao(),
         replayStorageDao = AppDatabase.getDatabase(context).replayStorageDao(),
         careerProgressDao = AppDatabase.getDatabase(context).careerProgressDao(),
-        timeTrialRecordDao = AppDatabase.getDatabase(context).timeTrialRecordDao()
+        timeTrialRecordDao = AppDatabase.getDatabase(context).timeTrialRecordDao(),
+        localTrackRecordDao = AppDatabase.getDatabase(context).localTrackRecordDao()
     )
 
     val driverProfileRepository = DriverProfileRepository(driverProfileDao, ioDispatcher)
@@ -61,6 +65,7 @@ class DataRepository(
     val leaderboardManager = timeTrialRecordDao?.let { LeaderboardManager(it, ioDispatcher) }
     val achievementManager = achievementsDao?.let { AchievementManager(it, driverProfileDao, ioDispatcher) }
     val replayManager = replayStorageDao?.let { ReplayManager(it, ioDispatcher) }
+    val localTrackRecordRepository = localTrackRecordDao?.let { LocalTrackRecordRepository(it, ioDispatcher) }
 
     // ========================================================================
     // Driver Profile APIs

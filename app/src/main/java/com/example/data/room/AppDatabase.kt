@@ -14,9 +14,10 @@ import androidx.room.RoomDatabase
         GlobalLeaderboards::class,
         ReplayStorage::class,
         CareerProgress::class,
-        TimeTrialRecord::class
+        TimeTrialRecord::class,
+        LocalTrackRecord::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -35,6 +36,8 @@ abstract class AppDatabase : RoomDatabase() {
     fun careerDao(): CareerProgressDao = careerProgressDao()
     abstract fun timeTrialRecordDao(): TimeTrialRecordDao
     fun leaderboardRecordDao(): TimeTrialRecordDao = timeTrialRecordDao()
+    abstract fun localTrackRecordDao(): LocalTrackRecordDao
+    fun trackRecordDao(): LocalTrackRecordDao = localTrackRecordDao()
 
     companion object {
         @Volatile

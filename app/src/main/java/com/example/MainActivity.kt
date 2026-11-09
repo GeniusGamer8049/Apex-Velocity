@@ -297,7 +297,8 @@ fun RacingApp(viewModel: MainViewModel) {
                                     onOpenReplayViewer = { trackId ->
                                         viewModel.openReplayViewer(trackId)
                                     },
-                                    timeTrialRecordsProvider = { viewModel.getTimeTrialRecordsForTrack(it) }
+                                    timeTrialRecordsProvider = { viewModel.getTimeTrialRecordsForTrack(it) },
+                                    trackRecordProvider = { viewModel.getLocalTrackRecordForTrack(it) }
                                 )
                             }
 
@@ -329,9 +330,11 @@ fun RacingApp(viewModel: MainViewModel) {
 
                             AppScreen.TELEMETRY -> {
                                 val telemetryHistory by viewModel.telemetryHistory.collectAsState()
+                                val sim2DTelemetry by viewModel.simulation2DTelemetry.collectAsState()
                                 TelemetryScreen(
                                     vehicle = viewModel.getCurrentVehicle(),
                                     telemetryHistory = telemetryHistory,
+                                    simulation2DTelemetry = sim2DTelemetry ?: viewModel.simulation2D.latestTelemetry,
                                     onBack = { viewModel.navigateTo(AppScreen.GARAGE) },
                                     onOpenPerformanceAnalytics = { viewModel.navigateTo(AppScreen.PERFORMANCE_ANALYTICS) }
                                 )
@@ -419,38 +422,10 @@ fun RacingApp(viewModel: MainViewModel) {
                     } else {
                         (state as com.example.model.CinematicHighlightUiState.GeneratingWithGemini).promptPreview
                     }
-                    androidx.compose.ui.window.Dialog(onDismissRequest = { viewModel.dismissCinematicHighlight() }) {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
-                            shape = RoundedCornerShape(16.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .border(1.dp, ApexCyan, RoundedCornerShape(16.dp))
-                                    .padding(20.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(14.dp)
-                            ) {
-                                androidx.compose.material3.CircularProgressIndicator(color = ApexCyan, strokeWidth = 3.dp)
-                                Text(
-                                    text = "GEMINI OMNI FLASH DIRECTING",
-                                    color = ApexCyan,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Black,
-                                    letterSpacing = 1.sp
-                                )
-                                Text(
-                                    text = statusText,
-                                    color = TextWhite,
-                                    fontSize = 12.sp,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                )
-                            }
-                        }
-                    }
+                    com.example.ui.dialogs.GeminiHighlightProgressDialog(
+                        statusText = statusText,
+                        onDismiss = { viewModel.dismissCinematicHighlight() }
+                    )
                 }
                 is com.example.model.CinematicHighlightUiState.Success -> {
                     val currentTrackId by viewModel.replaySelectedTrackId.collectAsState()
@@ -466,33 +441,10 @@ fun RacingApp(viewModel: MainViewModel) {
                     }
                 }
                 is com.example.model.CinematicHighlightUiState.Error -> {
-                    androidx.compose.ui.window.Dialog(onDismissRequest = { viewModel.dismissCinematicHighlight() }) {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
-                            shape = RoundedCornerShape(16.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .border(1.dp, ApexRed, RoundedCornerShape(16.dp))
-                                    .padding(20.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Text("DIRECTOR GENERATION ERROR", color = ApexRed, fontWeight = FontWeight.Black, fontSize = 14.sp)
-                                Text(state.message, color = TextWhite, fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                                androidx.compose.material3.Button(
-                                    onClick = { viewModel.dismissCinematicHighlight() },
-                                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = DarkSurface, contentColor = TextWhite),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Text("CLOSE")
-                                }
-                            }
-                        }
-                    }
+                    com.example.ui.dialogs.GeminiHighlightErrorDialog(
+                        errorMessage = state.message,
+                        onDismiss = { viewModel.dismissCinematicHighlight() }
+                    )
                 }
                 else -> {}
             }

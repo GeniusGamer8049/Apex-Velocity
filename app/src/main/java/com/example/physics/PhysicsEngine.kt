@@ -8,6 +8,8 @@ import com.example.model.Track
 import com.example.model.Vehicle
 import com.example.model.WeatherManager
 import com.example.model.WeatherType
+import com.example.physics.simulation2d.VehicleSimulation2D
+import com.example.physics.simulation2d.VehicleSimulation2DTelemetry
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -77,12 +79,20 @@ data class CarPhysicsState(
 
 
 class PhysicsEngine(
-    val integrationModule: PhysicsIntegrationModule = PhysicsIntegrationModule()
+    val integrationModule: PhysicsIntegrationModule = PhysicsIntegrationModule(),
+    val simulation2D: VehicleSimulation2D = VehicleSimulation2D()
 ) {
 
     val gearRatios = floatArrayOf(3.6f, 2.15f, 1.50f, 1.15f, 0.90f, 0.74f)
     val finalDrive = 3.9f
     val wheelRadiusM = 0.33f
+
+    fun resetSimulation(x: Float, y: Float, headingDeg: Float, vehicle: Vehicle? = null) {
+        if (vehicle != null) {
+            simulation2D.configureVehicle(vehicle)
+        }
+        simulation2D.reset(x, y, headingDeg)
+    }
 
     fun updatePlayer(
         state: CarPhysicsState,
@@ -104,6 +114,18 @@ class PhysicsEngine(
 
         val prevX = state.x
         val prevY = state.y
+
+        // Advance the 2D physics simulation structure for core rigid-body behavior, tire friction, and aero drag
+        simulation2D.step(
+            dt = dt,
+            throttleInput = throttleInput,
+            brakeInput = brakeInput,
+            steerInput = steerInput,
+            handbrake = handbrakeInput,
+            boost = boostInput,
+            surfaceGrip = state.effectiveTireGrip,
+            weather = currentWeather
+        )
 
         // Execute real-time vehicle velocity, friction, and tire grip integration step
         val result = integrationModule.integrate(
